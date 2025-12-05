@@ -6,3 +6,6 @@ redis
 couchdb
 neo4j
 pydantic
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart

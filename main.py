@@ -1,11 +1,11 @@
 import json
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Body
-from pydantic import BaseModel
-
+from fastapi import FastAPI, HTTPException, Depends, Body, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
 
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Boolean, Float, func
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
@@ -14,9 +14,24 @@ import redis
 import couchdb
 from neo4j import GraphDatabase
 
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 
 app = FastAPI(title="Sport Complex API")
 
+# Auth configuration
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 SQLALCHEMY_DATABASE_URL = "mysql+pymysql://sport-complex-cw:sport-complex-cw@127.0.0.1:3306/sport-complex-cw"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
@@ -51,6 +66,7 @@ class ClientDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String(100))
     email = Column(String(100), unique=True)
+    password_hash = Column(String(255))  # Store hashed password
     # role: 'client', 'trainer', 'admin' — keeps users in one table and allows easy filtering
     role = Column(String(20), default="client", index=True)
     # trainer specialization (nullable) — used when role == 'trainer'
@@ -101,11 +117,13 @@ class ProductDB(Base):
 class ClientCreate(BaseModel):
     full_name: str
     email: str
+    password: str
 
 
 class TrainerCreate(BaseModel):
     full_name: str
     email: str
+    password: str
     specialization: Optional[str] = None
 
 
@@ -211,6 +229,71 @@ def get_db():
         db.close()
 
 
+# Auth utilities
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    # Ensure password is a string
+    if not isinstance(password, str):
+        password = str(password)
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+def get_user_by_email(db: Session, email: str):
+    return db.query(ClientDB).filter(ClientDB.email == email).first()
+
+
+def authenticate_user(db: Session, email: str, password: str):
+    user = get_user_by_email(db, email)
+    if not user:
+        return False
+    if not verify_password(password, user.password_hash):
+        return False
+    return user
+
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = get_user_by_email(db, email=email)
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+def require_role(allowed_roles: List[str]):
+    async def role_checker(current_user: ClientDB = Depends(get_current_user)):
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required role: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return role_checker
+
+
 
 @app.on_event("startup")
 def startup_event():
@@ -239,6 +322,35 @@ def startup_event():
 
 
 
+@app.post("/login", response_model=dict)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Login endpoint - returns JWT token"""
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email, "role": user.role}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id, "role": user.role}
+
+
+@app.get("/me", response_model=dict)
+def get_current_user_info(current_user: ClientDB = Depends(get_current_user)):
+    """Get current authenticated user's information"""
+    return {
+        "id": current_user.id,
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "role": current_user.role,
+        "specialization": current_user.specialization if current_user.role == "trainer" else None
+    }
+
+
 @app.post("/clients/", response_model=dict)
 def create_client(client: ClientCreate, db: Session = Depends(get_db)):
     """Реєстрація нового клієнта в MySQL"""
@@ -247,7 +359,12 @@ def create_client(client: ClientCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    db_client = ClientDB(full_name=client.full_name, email=client.email, role="client")
+    db_client = ClientDB(
+        full_name=client.full_name, 
+        email=client.email, 
+        password_hash=get_password_hash(client.password),
+        role="client"
+    )
     db.add(db_client)
     db.commit()
     db.refresh(db_client)
@@ -271,6 +388,7 @@ def create_trainer(trainer: TrainerCreate, db: Session = Depends(get_db)):
     db_trainer = ClientDB(
         full_name=trainer.full_name,
         email=trainer.email,
+        password_hash=get_password_hash(trainer.password),
         role="trainer",
         specialization=trainer.specialization
     )
@@ -289,13 +407,18 @@ def create_trainer(trainer: TrainerCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/admins/", response_model=dict)
-def create_admin(admin: ClientCreate, db: Session = Depends(get_db)):
-    """Реєстрація адміністратора (admin role) в MySQL"""
+def create_admin(admin: ClientCreate, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """Реєстрація адміністратора (admin role) в MySQL - requires admin authentication"""
     existing = db.query(ClientDB).filter(ClientDB.email == admin.email).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    db_admin = ClientDB(full_name=admin.full_name, email=admin.email, role="admin")
+    db_admin = ClientDB(
+        full_name=admin.full_name, 
+        email=admin.email, 
+        password_hash=get_password_hash(admin.password),
+        role="admin"
+    )
     db.add(db_admin)
     db.commit()
     db.refresh(db_admin)
@@ -308,9 +431,41 @@ def create_admin(admin: ClientCreate, db: Session = Depends(get_db)):
     return {"status": "created", "id": db_admin.id, "name": db_admin.full_name}
 
 
+# FOR FIRST ADMIN CREATION - DELETE AFTER CREATING THE FIRST ADMIN
+@app.post("/admins/first-admin", response_model=dict)
+def create_first_admin(admin: ClientCreate, db: Session = Depends(get_db)):
+    """Create the first admin - only works if no admins exist in the system.
+    This endpoint should be removed or disabled after creating the first admin.
+    """
+    # Check if any admin already exists
+    existing_admin = db.query(ClientDB).filter(ClientDB.role == "admin").first()
+    if existing_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail="First admin already exists. Use /admins/ endpoint with admin authentication."
+        )
+    
+    # Check if email is already registered
+    existing = db.query(ClientDB).filter(ClientDB.email == admin.email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    db_admin = ClientDB(
+        full_name=admin.full_name, 
+        email=admin.email, 
+        password_hash=get_password_hash(admin.password),
+        role="admin"
+    )
+    db.add(db_admin)
+    db.commit()
+    db.refresh(db_admin)
+
+    return {"status": "created", "id": db_admin.id, "name": db_admin.full_name, "message": "First admin created successfully"}
+
+
 @app.get("/clients/list")
-def list_clients(db: Session = Depends(get_db)):
-    """List all clients."""
+def list_clients(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """List all clients - Admin only."""
     clients = db.query(ClientDB).filter(ClientDB.role == "client").all()
     return [{
         "id": u.id,
@@ -321,24 +476,33 @@ def list_clients(db: Session = Depends(get_db)):
 
 
 @app.get("/clients/{client_id}")
-def get_client(client_id: int, db: Session = Depends(get_db)):
-    """Return a single client by id."""
+def get_client(client_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return a single client by id - Clients can only view their own profile, admins can view any."""
     client = db.query(ClientDB).filter(ClientDB.id == client_id, ClientDB.role == "client").first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Clients can only view their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != client_id:
+        raise HTTPException(status_code=403, detail="You can only view your own profile")
 
     return {"id": client.id, "full_name": client.full_name, "email": client.email, "role": client.role}
 
 
 @app.delete("/clients/{client_id}", response_model=dict)
-def delete_client(client_id: int, db: Session = Depends(get_db)):
+def delete_client(client_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete a client if no subscriptions or sessions reference them.
-
+    
+    Clients can only delete their own profile, admins can delete any.
     Prevents accidental data loss; removes Neo4j node (best-effort).
     """
     client = db.query(ClientDB).filter(ClientDB.id == client_id, ClientDB.role == "client").first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Clients can only delete their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != client_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own profile")
     # Cascade-delete: remove training sessions and subscriptions belonging to this client
     # First, fetch and delete sessions where the client is the participant
     sessions = db.query(TrainingSessionDB).filter(TrainingSessionDB.client_id == client_id).all()
@@ -371,8 +535,8 @@ def delete_client(client_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/trainers/list")
-def list_trainers(db: Session = Depends(get_db)):
-    """List all trainers."""
+def list_trainers(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """List all trainers - Admin only."""
     trainers = db.query(ClientDB).filter(ClientDB.role == "trainer").all()
     return [{
         "id": u.id,
@@ -384,24 +548,33 @@ def list_trainers(db: Session = Depends(get_db)):
 
 
 @app.get("/trainers/{trainer_id}")
-def get_trainer(trainer_id: int, db: Session = Depends(get_db)):
-    """Return a single trainer by id."""
+def get_trainer(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return a single trainer by id - Trainers can only view their own profile, admins can view any."""
     trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
     if not trainer:
         raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only view their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only view your own profile")
 
     return {"id": trainer.id, "full_name": trainer.full_name, "email": trainer.email, "role": trainer.role, "specialization": trainer.specialization}
 
 
 @app.delete("/trainers/{trainer_id}", response_model=dict)
-def delete_trainer(trainer_id: int, db: Session = Depends(get_db)):
+def delete_trainer(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete a trainer if no training sessions reference them.
-
+    
+    Trainers can only delete their own profile, admins can delete any.
     Prevents accidental data loss; removes Neo4j node (best-effort).
     """
     trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
     if not trainer:
         raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only delete their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own profile")
 
     # check references: trainer assigned sessions
     sess_count = db.query(TrainingSessionDB).filter(TrainingSessionDB.trainer_id == trainer_id).count()
@@ -422,8 +595,8 @@ def delete_trainer(trainer_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/admins/list")
-def list_admins(db: Session = Depends(get_db)):
-    """List all admins."""
+def list_admins(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """List all admins - Admin only."""
     admins = db.query(ClientDB).filter(ClientDB.role == "admin").all()
     return [{
         "id": u.id,
@@ -434,8 +607,8 @@ def list_admins(db: Session = Depends(get_db)):
 
 
 @app.get("/admins/{admin_id}")
-def get_admin(admin_id: int, db: Session = Depends(get_db)):
-    """Return a single admin by id."""
+def get_admin(admin_id: int, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """Return a single admin by id - Admin only."""
     admin = db.query(ClientDB).filter(ClientDB.id == admin_id, ClientDB.role == "admin").first()
     if not admin:
         raise HTTPException(status_code=404, detail="Admin not found")
@@ -444,7 +617,7 @@ def get_admin(admin_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/admins/{admin_id}", response_model=dict)
-def delete_admin(admin_id: int, db: Session = Depends(get_db)):
+def delete_admin(admin_id: int, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Delete an admin. Removes Neo4j node (best-effort).
 
     Note: this does not enforce a 'last-admin' protection.
@@ -467,11 +640,15 @@ def delete_admin(admin_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/clients/{client_id}")
-def update_client(client_id: int, data: UserUpdate, db: Session = Depends(get_db)):
-    """Update client data (open to all callers)."""
+def update_client(client_id: int, data: UserUpdate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update client data - users can only update their own profile, admins can update any."""
     client = db.query(ClientDB).filter(ClientDB.id == client_id, ClientDB.role == "client").first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Users can only update their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != client_id:
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
 
     # prevent email collisions
     if data.email:
@@ -490,11 +667,15 @@ def update_client(client_id: int, data: UserUpdate, db: Session = Depends(get_db
 
 
 @app.put("/trainers/{trainer_id}")
-def update_trainer(trainer_id: int, data: TrainerUpdate, db: Session = Depends(get_db)):
-    """Update trainer data (open to all callers)."""
+def update_trainer(trainer_id: int, data: TrainerUpdate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update trainer data - trainers can update their own profile, admins can update any."""
     trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
     if not trainer:
         raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only update their own profile unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
 
     # prevent email collisions
     if data.email:
@@ -516,8 +697,8 @@ def update_trainer(trainer_id: int, data: TrainerUpdate, db: Session = Depends(g
 
 
 @app.put("/admins/{admin_id}")
-def update_admin(admin_id: int, data: UserUpdate, db: Session = Depends(get_db)):
-    """Update admin data (open to all callers)."""
+def update_admin(admin_id: int, data: UserUpdate, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """Update admin data - admins can update their own profile or other admins."""
     admin = db.query(ClientDB).filter(ClientDB.id == admin_id, ClientDB.role == "admin").first()
     if not admin:
         raise HTTPException(status_code=404, detail="Admin not found")
@@ -539,16 +720,20 @@ def update_admin(admin_id: int, data: UserUpdate, db: Session = Depends(get_db))
 
 
 @app.get("/trainers/{trainer_id}/sessions")
-def get_trainer_sessions(trainer_id: int, db: Session = Depends(get_db)):
+def get_trainer_sessions(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Return all training sessions for the given trainer.
-
+    
+    Trainers can only view their own sessions, admins can view any trainer's sessions.
     This endpoint verifies the trainer exists and has role 'trainer'.
     It returns session info with client name/email and service name.
     """
-    # allow listing by trainer id without enforcing role
     trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id).first()
     if not trainer:
         raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only view their own sessions unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only view your own sessions")
 
     sessions = db.query(TrainingSessionDB).filter(TrainingSessionDB.trainer_id == trainer_id).all()
     result = []
@@ -573,7 +758,7 @@ def get_trainer_sessions(trainer_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/sessions/", response_model=dict)
-def create_session(payload: TrainingSessionCreate, db: Session = Depends(get_db)):
+def create_session(payload: TrainingSessionCreate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Clients create a training session with a trainer for a service.
 
     Validations:
@@ -637,7 +822,7 @@ def create_session(payload: TrainingSessionCreate, db: Session = Depends(get_db)
 
 
 @app.post("/sessions/unassigned/", response_model=dict)
-def create_unassigned_session(payload: TrainingSessionCreateNoTrainer, db: Session = Depends(get_db)):
+def create_unassigned_session(payload: TrainingSessionCreateNoTrainer, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Clients create a training session WITHOUT specifying a trainer.
 
     Validations:
@@ -649,6 +834,10 @@ def create_unassigned_session(payload: TrainingSessionCreateNoTrainer, db: Sessi
     client = db.query(ClientDB).filter(ClientDB.id == payload.client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Clients can only create sessions for themselves unless they're admin
+    if current_user.role != "admin" and current_user.id != payload.client_id:
+        raise HTTPException(status_code=403, detail="You can only create sessions for yourself")
 
     # verify service
     service = db.query(ServiceDB).filter(ServiceDB.id == payload.service_id).first()
@@ -695,11 +884,15 @@ def create_unassigned_session(payload: TrainingSessionCreateNoTrainer, db: Sessi
 
 
 @app.delete("/clients/{client_id}/sessions/{session_id}", response_model=dict)
-def delete_client_session(client_id: int, session_id: int, db: Session = Depends(get_db)):
-    """Delete a session (no auth checks)."""
+def delete_client_session(client_id: int, session_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a session - clients can only delete their own sessions, admins can delete any."""
     sess = db.query(TrainingSessionDB).filter(TrainingSessionDB.id == session_id).first()
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Users can only delete their own sessions unless they're admin
+    if current_user.role != "admin" and current_user.id != sess.client_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own sessions")
 
     db.delete(sess)
     db.commit()
@@ -727,11 +920,15 @@ def delete_client_session(client_id: int, session_id: int, db: Session = Depends
 
 
 @app.delete("/trainers/{trainer_id}/sessions/{session_id}", response_model=dict)
-def delete_trainer_session(trainer_id: int, session_id: int, db: Session = Depends(get_db)):
-    """Delete a session (no auth checks)."""
+def delete_trainer_session(trainer_id: int, session_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a session - trainers can only delete their own sessions, admins can delete any."""
     sess = db.query(TrainingSessionDB).filter(TrainingSessionDB.id == session_id).first()
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Trainers can only delete sessions assigned to them unless they're admin
+    if current_user.role != "admin" and current_user.id != sess.trainer_id:
+        raise HTTPException(status_code=403, detail="You can only delete sessions assigned to you")
 
     db.delete(sess)
     db.commit()
@@ -749,7 +946,7 @@ def delete_trainer_session(trainer_id: int, session_id: int, db: Session = Depen
     return {"status": "deleted", "session_id": session_id}
 
 @app.delete("/sessions/{session_id}", response_model=dict)
-def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id: Optional[int] = None, db: Session = Depends(get_db)):
+def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id: Optional[int] = None, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete a session by ID with optional validation.
 
     If client_id provided, verifies the session belongs to that client.
@@ -759,6 +956,11 @@ def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id:
     sess = db.query(TrainingSessionDB).filter(TrainingSessionDB.id == session_id).first()
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Users can only delete their own sessions unless they're admin
+    if current_user.role != "admin":
+        if sess.client_id != current_user.id and sess.trainer_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only delete your own sessions")
 
     if client_id is not None and sess.client_id != client_id:
         raise HTTPException(status_code=403, detail="Session does not belong to the specified client")
@@ -791,7 +993,7 @@ def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id:
     return {"status": "deleted", "session_id": session_id}
 
 @app.get("/users/{user_id}/dashboard")
-def get_user_dashboard(user_id: int, db: Session = Depends(get_db)):
+def get_user_dashboard(user_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Return dashboard info for a user: upcoming sessions, completed sessions,
     subscriptions, and latest medical document (if any).
 
@@ -803,6 +1005,10 @@ def get_user_dashboard(user_id: int, db: Session = Depends(get_db)):
     user = db.query(ClientDB).filter(ClientDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Users can only view their own dashboard unless they're admin
+    if current_user.role != "admin" and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You can only view your own dashboard")
 
     now = datetime.utcnow()
 
@@ -879,7 +1085,7 @@ def get_user_dashboard(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/products/", response_model=dict)
-def add_product(product: ProductCreate, db: Session = Depends(get_db)):
+def add_product(product: ProductCreate, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Add a product to the shop and invalidate the products cache."""
     # prevent duplicate product names
     exists = db.query(ProductDB).filter(ProductDB.name == product.name).first()
@@ -935,7 +1141,7 @@ def list_products(db: Session = Depends(get_db)):
 
 
 @app.delete("/products/{product_id}", response_model=dict)
-def delete_product(product_id: int, db: Session = Depends(get_db)):
+def delete_product(product_id: int, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Delete a product by ID and invalidate the products cache."""
     product = db.query(ProductDB).filter(ProductDB.id == product_id).first()
     if not product:
@@ -955,7 +1161,7 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/products/{product_id}", response_model=dict)
-def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(get_db)):
+def update_product(product_id: int, data: ProductUpdate, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Update product by ID (all fields optional) and invalidate the products cache."""
     product = db.query(ProductDB).filter(ProductDB.id == product_id).first()
     if not product:
@@ -1012,7 +1218,7 @@ def get_services(db: Session = Depends(get_db)):
 
 
 @app.post("/services/", response_model=dict)
-def create_service(item: dict = Body(...), db: Session = Depends(get_db)):
+def create_service(item: dict = Body(...), current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """
     Create a new Service.
     Body example: {"name": "Pilates", "requires_medical": false}
@@ -1048,7 +1254,7 @@ def create_service(item: dict = Body(...), db: Session = Depends(get_db)):
 
 
 @app.delete("/services/{service_id}", response_model=dict)
-def delete_service(service_id: int, db: Session = Depends(get_db)):
+def delete_service(service_id: int, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Delete a service if no subscriptions or sessions reference it.
 
     Checks:
@@ -1086,7 +1292,7 @@ def delete_service(service_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/services/{service_id}", response_model=dict)
-def update_service(service_id: int, data: ServiceUpdate, db: Session = Depends(get_db)):
+def update_service(service_id: int, data: ServiceUpdate, current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """Update service by ID (name and/or requires_medical).
     
     Validates:
@@ -1143,13 +1349,23 @@ def update_service(service_id: int, data: ServiceUpdate, db: Session = Depends(g
 
 
 @app.post("/medical-checkup/")
-def submit_medical_doc(doc: MedicalDocInput):
+def submit_medical_doc(doc: MedicalDocInput, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Приймає результати обстеження від клініки.
     Зберігає неструктурований документ в CouchDB.
+    Clients can only submit their own medical documents, admins can submit for any client.
     """
     if not db_couch:
         raise HTTPException(status_code=500, detail="CouchDB not connected")
+    
+    # Clients can only submit medical docs for themselves unless they're admin
+    if current_user.role != "admin" and current_user.email != doc.client_email:
+        raise HTTPException(status_code=403, detail="You can only submit medical documents for yourself")
+    
+    # Verify the client email exists in the database
+    client = get_user_by_email(db, doc.client_email)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client with this email not found")
     
     document = {
         "type": "medical_certificate",
@@ -1170,7 +1386,7 @@ def submit_medical_doc(doc: MedicalDocInput):
 
 
 @app.post("/cancel-subscription/")
-def cancel_subscription(cancel_data: SubscriptionCancel, db: Session = Depends(get_db)):
+def cancel_subscription(cancel_data: SubscriptionCancel, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Скасування підписки на послугу.
     Видаляє запис з MySQL і видаляє зв'язок з Neo4j.
@@ -1179,6 +1395,10 @@ def cancel_subscription(cancel_data: SubscriptionCancel, db: Session = Depends(g
     client = db.query(ClientDB).filter(ClientDB.id == cancel_data.client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Clients can only cancel their own subscriptions unless they're admin
+    if current_user.role != "admin" and current_user.id != cancel_data.client_id:
+        raise HTTPException(status_code=403, detail="You can only cancel your own subscriptions")
     
     service = db.query(ServiceDB).filter(ServiceDB.name == cancel_data.service_name).first()
     if not service:
@@ -1210,7 +1430,7 @@ def cancel_subscription(cancel_data: SubscriptionCancel, db: Session = Depends(g
 
 
 @app.post("/subscriptions/", response_model=dict)
-def create_subscription(sub_data: SubscriptionCreate, db: Session = Depends(get_db)):
+def create_subscription(sub_data: SubscriptionCreate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Create a new subscription (alias for /subscribe/ endpoint).
     
     Validates:
@@ -1223,6 +1443,10 @@ def create_subscription(sub_data: SubscriptionCreate, db: Session = Depends(get_
     client = db.query(ClientDB).filter(ClientDB.id == sub_data.client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Clients can only create subscriptions for themselves unless they're admin
+    if current_user.role != "admin" and current_user.id != sub_data.client_id:
+        raise HTTPException(status_code=403, detail="You can only create subscriptions for yourself")
     
     service = db.query(ServiceDB).filter(ServiceDB.name == sub_data.service_name).first()
     if not service:
@@ -1265,7 +1489,7 @@ def create_subscription(sub_data: SubscriptionCreate, db: Session = Depends(get_
 
 
 @app.delete("/subscriptions/{subscription_id}", response_model=dict)
-def delete_subscription(subscription_id: int, db: Session = Depends(get_db)):
+def delete_subscription(subscription_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete a subscription by ID.
     
     Also removes the Neo4j USES relationship (best-effort).
@@ -1273,6 +1497,10 @@ def delete_subscription(subscription_id: int, db: Session = Depends(get_db)):
     sub = db.query(SubscriptionDB).filter(SubscriptionDB.id == subscription_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    
+    # Users can only delete their own subscriptions unless they're admin
+    if current_user.role != "admin" and current_user.id != sub.client_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own subscriptions")
 
     # Get client and service info for Neo4j cleanup
     client = db.query(ClientDB).filter(ClientDB.id == sub.client_id).first()
@@ -1296,7 +1524,7 @@ def delete_subscription(subscription_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/subscriptions/{subscription_id}", response_model=dict)
-def update_subscription(subscription_id: int, data: SubscriptionUpdate, db: Session = Depends(get_db)):
+def update_subscription(subscription_id: int, data: SubscriptionUpdate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Update subscription by ID (plan_type and/or medical_doc_id).
     
     Validates:
@@ -1308,6 +1536,10 @@ def update_subscription(subscription_id: int, data: SubscriptionUpdate, db: Sess
     sub = db.query(SubscriptionDB).filter(SubscriptionDB.id == subscription_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    
+    # Users can only update their own subscriptions unless they're admin
+    if current_user.role != "admin" and current_user.id != sub.client_id:
+        raise HTTPException(status_code=403, detail="You can only update your own subscriptions")
 
     # Get service to check if it requires medical doc
     service = db.query(ServiceDB).filter(ServiceDB.id == sub.service_id).first()
@@ -1346,7 +1578,7 @@ def update_subscription(subscription_id: int, data: SubscriptionUpdate, db: Sess
 
 
 @app.get("/analytics/popular-services")
-def get_popular_services():
+def get_popular_services(current_user: ClientDB = Depends(require_role(["admin"]))):
     """
     Використовує Neo4j для підрахунку популярності.
     Адміністрація дивиться цей звіт.
@@ -1370,7 +1602,7 @@ def get_popular_services():
 
 
 @app.get("/analytics/popular-trainers")
-def get_popular_trainers(db: Session = Depends(get_db)):
+def get_popular_trainers(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """
     Returns most popular trainers by number of scheduled sessions.
     Primary source: Neo4j (counts SCHEDULED relationships).
@@ -1414,7 +1646,7 @@ def get_popular_trainers(db: Session = Depends(get_db)):
 
 
 @app.get("/analytics/popular-subscriptions")
-def get_subscription_stats(db: Session = Depends(get_db)):
+def get_subscription_stats(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
     """
     Returns subscription counts grouped by service and plan_type.
     Uses MySQL (SubscriptionDB joined with ServiceDB).
