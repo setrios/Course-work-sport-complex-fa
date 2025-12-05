@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SportComplex - Спортивний комплекс та магазин</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">💪</span>
+                    <span class="logo-text">SportComplex</span>
+                </div>
+                <nav class="nav">
+                    <a href="#home" class="nav-link active">🏠 Головна</a>
+                    <a href="#shop" class="nav-link">🛒 Магазин</a>
+                    <a href="#services" class="nav-link">🏋️ Послуги</a>
+                    <a href="#trainers" class="nav-link">👤 Тренери</a>
+                    <a href="#clients" class="nav-link">📋 Клієнти</a>
+                    <a href="#analytics" class="nav-link">📊 Аналітика</a>
+                </nav>
+                <div class="header-actions">
+                    <span id="user-info" class="user-info" style="display: none;">
+                        👤 <span id="user-name"></span>
+                    </span>
+                    <button id="auth-button" class="btn btn-secondary" onclick="app.showLogin()">
+                        🔐 Вхід
+                    </button>
+                    <button class="cart-button" onclick="app.showCart()">
+                        🛒 Кошик <span class="cart-count">0</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main" id="app">
+        <!-- Dynamic content loaded here -->
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Завантаження...</p>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 SportComplex. Усі права захищено.</p>
+            <p class="footer-tech">Powered by: MySQL + Redis + Neo4j + CouchDB</p>
+        </div>
+    </footer>
+
+    <!-- Modal Container -->
+    <div id="modal-container"></div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/components.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>

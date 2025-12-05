@@ -1,0 +1,395 @@
+# Як використовуються бази даних у SportComplex API
+
+## 🎯 Загальна концепція
+
+Проект використовує **Polyglot Persistence** - різні бази даних для різних типів даних та завдань.
+
+---
+
+## 1️⃣ MySQL - Основна транзакційна БД
+
+### 📌 Призначення
+Зберігання **структурованих реляційних даних** з ACID гарантіями.
+
+### 💾 Що зберігає:
+- **Користувачі** ([users](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/redis_service.py#57-63)) - email, пароль, роль
+- **Клієнти** ([clients](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/client_service.py#10-15)) - профілі клієнтів спорткомплексу
+- **Тренери** ([trainers](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/trainer_service.py#7-12)) - інформація про тренерів, спеціалізація, рейтинг
+- **Послуги** ([services](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/api/v1/services.py#10-16)) - фітнес, басейн, масаж, тренажерний зал
+- **Продукти** ([products](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/product_service.py#7-25)) - товари в магазині (спортхарч, вода, аксесуари)
+- **Замовлення** ([orders](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/order_service.py#18-23)) - покупки клієнтів
+- **Тренування** (`training_sessions`) - заплановані та завершені сесії
+
+### 🔍 Приклади використання:
+
+#### Створення клієнта:
+```python
+POST /api/v1/clients
+{
+  "first_name": "Іван",
+  "last_name": "Петренко",
+  "phone": "+380501234567"
+}
+```
+→ Зберігається в таблиці [clients](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/client_service.py#10-15)
+
+#### Створення замовлення:
+```python
+POST /api/v1/orders
+{
+  "client_id": 1,
+  "items": [{"product_id": 5, "quantity": 2}]
+}
+```
+→ Створює записи в [orders](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/order_service.py#18-23) та [order_items](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/order_service.py#137-142)
+→ Оновлює кількість в `products.quantity_in_stock`
+
+### ✅ Чому MySQL?
+- Підтримка транзакцій (замовлення = order + order_items атомарно)
+- Foreign Keys забезпечують цілісність даних
+- SQL запити для складних фільтрів та JOIN'ів
+- Перевірені роками надійність та продуктивність
+
+---
+
+## 2️⃣ Redis - Кеш та реал-тайм дані
+
+### 📌 Призначення
+**Швидкий доступ до часто використовуваних даних** та відстеження в реальному часі.
+
+### 💾 Що зберігає:
+
+1. **Кеш продуктів** (`product:{id}`)
+   - TTL: 1 година
+   - Зменшує навантаження на MySQL
+
+2. **Бестселери** ([bestsellers](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/redis_service.py#70-76) - sorted set)
+   - Рейтинг найпопулярніших продуктів
+   - Оновлюється при кожній покупці
+
+3. **Реал-тайм запаси** (`stock:{product_id}`)
+   - Актуальна кількість товару
+   - Синхронізується з MySQL
+
+4. **Онлайн користувачі** (`online:{user_id}`)
+   - TTL: 5 хвилин
+   - Список активних користувачів
+
+5. **Кеш розкладу тренерів** (`trainer:schedule:{id}`)
+   - TTL: 2 години
+
+### 🔍 Приклади використання:
+
+#### Перегляд продукту (з кешуванням):
+```bash
+GET /api/v1/products/1
+```
+**Алгоритм:**
+1. Перевіряє Redis: `GET product:1`
+2. Якщо є → повертає з кешу (швидко! ⚡)
+3. Якщо немає → йде в MySQL
+4. Зберігає результат у Redis на 1 год
+5. Повертає клієнту
+
+#### Топ бестселерів:
+```bash
+GET /api/v1/analytics/bestsellers?limit=10
+```
+→ Читає з Redis: `ZREVRANGE bestsellers 0 9 WITHSCORES`
+→ Миттєва відповідь без запитів до MySQL
+
+#### Створення замовлення (оновлення бестселерів):
+```python
+POST /api/v1/orders
+{
+  "items": [{"product_id": 3, "quantity": 1}]
+}
+```
+**Що відбувається в Redis:**
+```redis
+ZINCRBY bestsellers 1 "3"        # Збільшує рейтинг продукту #3
+SET stock:3 47                    # Оновлює запаси
+```
+
+### ✅ Чому Redis?
+- **Швидкість**: in-memory, мілісекунди на запит
+- **TTL**: автоматичне видалення застарілих даних
+- **Sorted Sets**: ідеально для рейтингів/топів
+- **Atomic операції**: безпечні інкременти лічильників
+
+---
+
+## 3️⃣ Neo4j - Графова БД для рекомендацій
+
+### 📌 Призначення
+**Зв'язки між сутностями** та рекомендаційна система.
+
+### 💾 Що зберігає:
+
+**Вузли (Nodes):**
+- [Client](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/models/client.py#4-13) - клієнти
+- [Trainer](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/models/trainer.py#17-37) - тренери
+- [Product](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/models/product.py#15-44) - продукти
+- [Service](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/models/service.py#6-14) - послуги
+
+**Зв'язки (Relationships):**
+- [(Client)-[:PURCHASED]->(Product)](file:///d:/VS%20Code%20lib/bd/Course-work-sport-complex-fa/main.py#15-84) - хто що купив
+- [(Client)-[:TRAINED_WITH]->(Trainer)](file:///d:/VS%20Code%20lib/bd/Course-work-sport-complex-fa/main.py#15-84) - хто з ким тренувався
+- [(Client)-[:VISITED]->(Service)](file:///d:/VS%20Code%20lib/bd/Course-work-sport-complex-fa/main.py#15-84) - відвідування послуг
+- [(Trainer)-[:SPECIALIZES_IN]->(Service)](file:///d:/VS%20Code%20lib/bd/Course-work-sport-complex-fa/main.py#15-84) - спеціалізація тренерів
+
+### 🔍 Приклади використання:
+
+#### Створення клієнта (автоматично):
+```python
+POST /api/v1/clients
+{
+  "first_name": "Марія",
+  "last_name": "Коваленко"
+}
+```
+**Що відбувається:**
+1. Зберігається в MySQL ([clients](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/client_service.py#10-15) table)
+2. **Автоматично** створюється вузол в Neo4j:
+```cypher
+CREATE (c:Client {
+  id: 1,
+  name: "Марія Коваленко",
+  registration_date: date("2025-12-05")
+})
+```
+
+#### Створення замовлення (запис зв'язків):
+```python
+POST /api/v1/orders
+{
+  "client_id": 1,
+  "items": [{"product_id": 5, "quantity": 2}]
+}
+```
+**Що відбувається в Neo4j:**
+```cypher
+MATCH (c:Client {id: 1})
+MATCH (p:Product {id: 5})
+CREATE (c)-[:PURCHASED {
+  quantity: 2,
+  total_price: 150.00,
+  date: datetime()
+}]->(p)
+```
+
+#### Рекомендації продуктів:
+```bash
+GET /api/v1/recommendations/products/1
+```
+**Cypher запит:**
+```cypher
+// Знайти продукти, які купували схожі клієнти
+MATCH (c:Client {id: 1})-[:PURCHASED]->(p:Product)
+MATCH (p)<-[:PURCHASED]-(other:Client)
+MATCH (other)-[:PURCHASED]->(rec:Product)
+WHERE NOT (c)-[:PURCHASED]->(rec)
+RETURN rec.name, COUNT(*) AS score
+ORDER BY score DESC
+LIMIT 5
+```
+**Логіка:** "Клієнт #1 купив продукт A, інші клієнти які також купили A, також купували B та C → рекомендуємо B і C"
+
+#### Рекомендації тренерів:
+```bash
+GET /api/v1/recommendations/trainers/1
+```
+→ На основі графу "хто з ким тренувався" знаходить схожих клієнтів та їхніх високооцінених тренерів
+
+### ✅ Чому Neo4j?
+- **Граф запити**: природно для "знайти схожих користувачів"
+- **Collaborative filtering**: рекомендації на основі поведінки інших
+- **Швидкість**: обхід графу швидший ніж JOIN'и в SQL
+- **Гнучкість**: легко додавати нові типи зв'язків
+
+---
+
+## 4️⃣ CouchDB - Документо-орієнтована БД
+
+### 📌 Призначення
+Зберігання **неструктурованих/напівструктурованих документів** великого розміру.
+
+### 💾 Що зберігає:
+
+1. **Медичні сертифікати** ([medical_certificate](file:///d:/VS%20Code%20lib/bd/sport-complex-api/app/services/document_service.py#35-40))
+   ```json
+   {
+     "_id": "cert-123",
+     "doc_type": "medical_certificate",
+     "client_id": 1,
+     "clinic_id": 101,
+     "expiry_date": "2025-12-31",
+     "doctor": {
+       "name": "Dr. Іванов",
+       "license": "MD12345"
+     },
+     "examination_results": {
+       "blood_pressure": "120/80",
+       "heart_rate": 72,
+       "status": "healthy",
+       "notes": "Допущений до тренувань"
+     }
+   }
+   ```
+
+2. **Логи тренувань** (`training_session_log`)
+   ```json
+   {
+     "_id": "log-456",
+     "doc_type": "training_session_log",
+     "session_id": 15,
+     "trainer_id": 3,
+     "client_id": 1,
+     "exercises": [
+       {"name": "Присідання", "sets": 4, "reps": 12, "weight": 60},
+       {"name": "Жим лежачи", "sets": 3, "reps": 10, "weight": 50}
+     ],
+     "notes": "Чудовий прогрес! +5кг до жиму",
+     "duration_minutes": 60
+   }
+   ```
+
+3. **Адміністративні звіти** (`administrative_report`)
+   ```json
+   {
+     "_id": "report-789",
+     "doc_type": "administrative_report",
+     "report_type": "monthly_revenue",
+     "period": {
+       "start_date": "2025-11-01",
+       "end_date": "2025-11-30"
+     },
+     "data": {
+       "total_revenue": 125000,
+       "orders_count": 342,
+       "top_products": [...]
+     }
+   }
+   ```
+
+4. **Листи постачальникам** (`supply_request_letter`)
+
+### 🔍 Приклади використання:
+
+#### Створення медичного сертифікату:
+```bash
+POST /api/v1/documents/medical-certificates
+{
+  "client_id": 1,
+  "clinic_id": 101,
+  "expiry_date": "2025-12-31",
+  "doctor": {
+    "name": "Dr. Петренко",
+    "license": "MD54321"
+  },
+  "examination_results": {
+    "blood_pressure": "118/75",
+    "status": "healthy"
+  }
+}
+```
+→ Зберігається в CouchDB
+→ Повертає `document_id` для доступу
+
+#### Отримання сертифікатів клієнта:
+```bash
+GET /api/v1/documents/medical-certificates/client/1
+```
+→ Повертає всі медичні документи клієнта #1
+
+#### Створення логу тренування:
+```bash
+POST /api/v1/documents/session-logs
+{
+  "session_id": 10,
+  "trainer_id": 2,
+  "client_id": 1,
+  "exercises": [
+    {"name": "Біг", "duration_min": 15},
+    {"name": "Підтягування", "sets": 3, "reps": 8}
+  ],
+  "notes": "Покращення витривалості"
+}
+```
+
+### ✅ Чому CouchDB?
+- **Схема-less**: документи можуть мати різну структуру
+- **JSON native**: природний формат для JavaScript/Python
+- **Великі документи**: медичні дані можуть бути об'ємними
+- **Версіонування**: CouchDB зберігає історію змін
+- **Offline-first**: можна синхронізувати пізніше
+
+---
+
+## 🔄 Як вони працюють разом
+
+### Сценарій: Клієнт купує протеїн
+
+```
+1. POST /api/v1/orders
+   {
+     "client_id": 1,
+     "items": [{"product_id": 5, "quantity": 1}]
+   }
+
+┌─────────────────────────────────────────────────┐
+│  MySQL (Транзакція)                             │
+├─────────────────────────────────────────────────┤
+│  • Створює запис в `orders`                     │
+│  • Створює запис в `order_items`                │
+│  • Зменшує `products.quantity_in_stock`         │
+│  • COMMIT (атомарно!)                           │
+└─────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────┐
+│  Redis (Кеш + Аналітика)                        │
+├─────────────────────────────────────────────────┤
+│  • ZINCRBY bestsellers 1 "5"  (бестселер +1)    │
+│  • SET stock:5 24  (оновлення реал-тайм запасів)│
+│  • DEL product:5  (інвалідація кешу)            │
+└─────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────┐
+│  Neo4j (Граф)                                   │
+├─────────────────────────────────────────────────┤
+│  CREATE (c:Client {id:1})-[:PURCHASED {         │
+│    quantity: 1,                                 │
+│    price: 850,                                  │
+│    date: datetime()                             │
+│  }]->(p:Product {id:5})                         │
+└─────────────────────────────────────────────────┘
+
+РЕЗУЛЬТАТ:
+✅ Замовлення збережено (MySQL)
+✅ Аналітика оновлена (Redis)
+✅ Рекомендації тепер враховують цю покупку (Neo4j)
+```
+
+---
+
+## 📊 Порівняльна таблиця
+
+| База даних | Тип | Призначення | Приклади даних | Особливість |
+|------------|-----|-------------|----------------|-------------|
+| **MySQL** | Реляційна | Основні дані | Users, Products, Orders | ACID, Транзакції |
+| **Redis** | Key-Value | Кеш, Лічильники | Кеш продуктів, Бестселери | In-memory, Швидкість |
+| **Neo4j** | Графова | Зв'язки, Рекомендації | Client→Product, Social Graph | Граф запити |
+| **CouchDB** | Документна | Великі документи | Сертифікати, Звіти, Логи | JSON, Схема-less |
+
+---
+
+## 🎯 Висновок
+
+Кожна база даних робить те, для чого вона найкраще підходить:
+
+- **MySQL** = "джерело правди" для критичних даних
+- **Redis** = швидкість та реал-тайм
+- **Neo4j** = розумні рекомендації
+- **CouchDB** = гнучкість для документів
+
+Разом вони створюють **потужну, масштабовану та ефективну** систему! 🚀
