@@ -5,16 +5,9 @@ const app = {
     currentUser: null,
 
     init() {
-        // Check if user is logged in
         this.checkAuth();
-
-        // Set up navigation
         this.setupNavigation();
-
-        // Load initial page
         this.navigate(window.location.hash || '#home');
-
-        // Update cart display
         this.updateCartCount();
     },
 
@@ -34,26 +27,37 @@ const app = {
         const userName = document.getElementById('user-name');
 
         if (this.currentUser) {
-            // Show user info, hide login button
             userInfo.style.display = 'inline';
             userName.textContent = this.currentUser.name;
             authButton.textContent = '🚪 Вихід';
             authButton.onclick = () => this.logout();
         } else {
-            // Hide user info, show login button
             userInfo.style.display = 'none';
             authButton.textContent = '🔐 Вхід';
             authButton.onclick = () => this.showLogin();
         }
+
+        this.updateNavigation();
+    },
+
+    updateNavigation() {
+        const clientsLink = document.querySelector('a[href="#clients"]');
+        const analyticsLink = document.querySelector('a[href="#analytics"]');
+
+        if (this.currentUser && this.currentUser.role === 'admin') {
+            if (clientsLink) clientsLink.style.display = '';
+            if (analyticsLink) analyticsLink.style.display = '';
+        } else {
+            if (clientsLink) clientsLink.style.display = 'none';
+            if (analyticsLink) analyticsLink.style.display = 'none';
+        }
     },
 
     setupNavigation() {
-        // Handle hash changes
         window.addEventListener('hashchange', () => {
             this.navigate(window.location.hash);
         });
 
-        // Navigation link clicks
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
                 document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
@@ -66,7 +70,6 @@ const app = {
         const page = hash.replace('#', '') || 'home';
         this.currentPage = page;
 
-        // Route to appropriate page
         const routes = {
             'home': () => this.renderHome(),
             'shop': () => this.renderShop(),
@@ -139,19 +142,31 @@ const app = {
         appEl.innerHTML = components.showLoading();
 
         try {
-            const products = await api.getProducts({ limit: 50 });
-
-            if (products.length === 0) {
-                appEl.innerHTML = `<div class="container">${components.showEmptyState('Немає товарів', '📭')}</div>`;
-                return;
-            }
+            const products = await api.getProducts({ limit: 20 });
 
             appEl.innerHTML = `
                 <div class="container">
-                    <h1 style="margin-bottom: 2rem;">🛒 Магазин спортивного харчування</h1>
-                    
+                    <h1 style="margin-bottom: 2rem;">🛒 Магазин спорттоварів</h1>
                     <div class="card-grid">
-                        ${products.map(p => components.createProductCard(p)).join('')}
+                        ${products.map(product => `
+                            <div class="card">
+                                <div class="product-image">${this.getProductIcon(product.category)}</div>
+                                <h3>${product.name}</h3>
+                                <p class="text-muted">${product.category}</p>
+                                <p style="margin: 1rem 0;">${product.description || ''}</p>
+                                <div class="flex-between">
+                                    <strong>${product.price} грн</strong>
+                                    <span class="text-muted">На складі: ${product.quantity_in_stock}</span>
+                                </div>
+                                <button 
+                                    class="btn mt-1" 
+                                    onclick="app.addToCart(${product.id}, '${product.name}', ${product.price})"
+                                    ${product.quantity_in_stock === 0 ? 'disabled' : ''}
+                                >
+                                    ${product.quantity_in_stock === 0 ? '❌ Немає в наявності' : '➕ В кошик'}
+                                </button>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             `;
@@ -167,28 +182,23 @@ const app = {
         try {
             const services = await api.getServices();
 
-            if (services.length === 0) {
-                appEl.innerHTML = `<div class="container">${components.showEmptyState('Немає послуг', '🏋️')}</div>`;
-                return;
-            }
-
             appEl.innerHTML = `
                 <div class="container">
-                    <h1 style="margin-bottom: 2rem;">🏋️ Наші послуги та тренування</h1>
-                    
+                    <h1 style="margin-bottom: 2rem;">🏋️ Наші послуги</h1>
                     <div class="card-grid">
                         ${services.map(service => `
                             <div class="card">
-                                <div class="product-image">${service.service_type === 'training' ? '🏋️' : '💆'}</div>
-                                <div class="product-info">
-                                    <h3>${service.name}</h3>
-                                    <p class="text-muted">${service.description}</p>
-                                    <div class="product-price">${service.price} грн</div>
-                                    <p class="text-muted">⏱️ Тривалість: ${service.duration_minutes} хв</p>
-                                    <button class="btn mt-1" onclick="app.bookService(${service.id}, '${service.name}', ${service.price})">
-                                        📅 Забронювати
-                                    </button>
+                                <div class="product-image">${this.getServiceIcon(service.service_type)}</div>
+                                <h3>${service.name}</h3>
+                                <p class="text-muted">${service.service_type}</p>
+                                <p style="margin: 1rem 0;">${service.description || ''}</p>
+                                <div class="flex-between" style="margin: 1rem 0;">
+                                    <span><strong>${service.price}</strong> грн</span>
+                                    <span class="text-muted">⏱️ ${service.duration_minutes} хв</span>
                                 </div>
+                                <button class="btn mt-1" onclick="app.bookService(${service.id}, '${service.name}', ${service.price})">
+                                    📅 Забронювати
+                                </button>
                             </div>
                         `).join('')}
                     </div>
@@ -204,19 +214,27 @@ const app = {
         appEl.innerHTML = components.showLoading();
 
         try {
-            const trainers = await api.getTrainers({ limit: 50 });
-
-            if (trainers.length === 0) {
-                appEl.innerHTML = `<div class="container">${components.showEmptyState('Немає тренерів', '👤')}</div>`;
-                return;
-            }
+            const trainers = await api.getTrainers({ limit: 20 });
 
             appEl.innerHTML = `
                 <div class="container">
-                    <h1 style="margin-bottom: 2rem;">👤 Наші тренери</h1>
-                    
+                    <h1 style="margin-bottom: 2rem;">👥 Наші тренери</h1>
                     <div class="card-grid">
-                        ${trainers.map(t => components.createTrainerCard(t)).join('')}
+                        ${trainers.map(trainer => `
+                            <div class="card" onclick="app.viewTrainer(${trainer.id})" style="cursor: pointer;">
+                                <div class="product-image">${this.getTrainerIcon(trainer.specialization)}</div>
+                                <h3>${trainer.first_name} ${trainer.last_name}</h3>
+                                <p class="text-muted">${trainer.specialization}</p>
+                                ${trainer.bio ? `<p style="margin: 1rem 0;">${trainer.bio.substring(0, 100)}...</p>` : ''}
+                                <div class="flex-between">
+                                    <span>⭐ ${trainer.rating}/5</span>
+                                    <span class="text-muted">${trainer.total_sessions} сесій</span>
+                                </div>
+                                <div style="margin-top: 1rem;">
+                                    <strong>${trainer.hourly_rate}</strong> грн/год
+                                </div>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             `;
@@ -227,36 +245,55 @@ const app = {
 
     async renderClients() {
         const appEl = document.getElementById('app');
+
+        if (!this.currentUser || this.currentUser.role !== 'admin') {
+            appEl.innerHTML = `
+                <div class="container">
+                    ${components.showEmptyState('Доступ заборонено', '🔒')}
+                </div>
+            `;
+            return;
+        }
+
         appEl.innerHTML = components.showLoading();
 
         try {
-            const clients = await api.getClients({ limit: 100 });
+            const clients = await api.getClients({ limit: 50 });
 
             appEl.innerHTML = `
                 <div class="container">
                     <div class="flex-between" style="margin-bottom: 2rem;">
-                        <h1>📋 Клієнти</h1>
-                        <button class="btn" onclick="app.showAddClientForm()">
-                            ➕ Додати клієнта
-                        </button>
+                        <h1>👥 Клієнти</h1>
+                        <button class="btn" onclick="app.showAddClientForm()">➕ Додати клієнта</button>
                     </div>
-
-                    ${clients.length === 0
-                    ? components.showEmptyState('Немає клієнтів', '📭')
-                    : `<table class="table">
+                    ${clients.length > 0
+                    ? `<table class="table">
                             <thead>
                                 <tr>
                                     <th>ID</th>
                                     <th>Ім'я</th>
+                                    <th>Прізвище</th>
                                     <th>Телефон</th>
-                                    <th>Дата реєстрації</th>
-                                    <th>Дії</th>
+                                    <th>Дія</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${clients.map(c => components.createClientRow(c)).join('')}
+                                ${clients.map(client => `
+                                    <tr>
+                                        <td>${client.id}</td>
+                                        <td>${client.first_name}</td>
+                                        <td>${client.last_name}</td>
+                                        <td>${client.phone || '-'}</td>
+                                        <td>
+                                            <button class="btn btn-secondary sm" onclick="app.viewClient(${client.id})">
+                                                👁️ Переглянути
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
                             </tbody>
                            </table>`
+                    : components.showEmptyState('Поки що немає клієнтів', '👥')
                 }
                 </div>
             `;
@@ -267,36 +304,52 @@ const app = {
 
     async renderAnalytics() {
         const appEl = document.getElementById('app');
+
+        if (!this.currentUser || this.currentUser.role !== 'admin') {
+            appEl.innerHTML = `
+                <div class="container">
+                    ${components.showEmptyState('Доступ заборонено', '🔒')}
+                </div>
+            `;
+            return;
+        }
+
         appEl.innerHTML = components.showLoading();
 
         try {
-            const [bestsellers, orders] = await Promise.all([
+            const [bestsellers, orders, products] = await Promise.all([
                 api.getBestsellers(10),
-                api.getOrders({ limit: 10 })
+                api.getOrders({ limit: 10 }),
+                api.getProducts({ limit: 100 })
             ]);
+
+            const productMap = {};
+            products.forEach(p => productMap[p.id] = p);
 
             appEl.innerHTML = `
                 <div class="container">
                     <h1 style="margin-bottom: 2rem;">📊 Аналітика та статистика</h1>
 
-                    <h2 style="margin: 2rem 0 1rem;">🏆 Топ-10 бестселерів</h2>
+                    <h2 style="margin: 2rem 0 1rem;">🏆 Бестселери</h2>
                     ${bestsellers.bestsellers && bestsellers.bestsellers.length > 0
                     ? `<table class="table">
                             <thead>
                                 <tr>
                                     <th>Місце</th>
-                                    <th>ID Продукту</th>
-                                    <th>Кількість продажів</th>
+                                    <th>Товар</th>
+                                    <th>Продано</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${bestsellers.bestsellers.map((item, index) => `
+                                ${bestsellers.bestsellers.map((item, index) => {
+                        const product = productMap[item.product_id];
+                        return `
                                     <tr>
-                                        <td>${index + 1}</td>
-                                        <td>#${item.product_id}</td>
-                                        <td>${Math.round(item.sales_count)}</td>
+                                        <td><strong>${index + 1}</strong></td>
+                                        <td>${product ? product.name : `Товар #${item.product_id}`}</td>
+                                        <td><strong>${item.sales_count}</strong> шт</td>
                                     </tr>
-                                `).join('')}
+                                `}).join('')}
                             </tbody>
                            </table>`
                     : components.showEmptyState('Поки що немає даних про продажі', '📊')
@@ -307,21 +360,35 @@ const app = {
                     ? `<table class="table">
                             <thead>
                                 <tr>
-                                    <th>Номер замовлення</th>
+                                    <th>Номер</th>
                                     <th>Дата</th>
+                                    <th>Товари</th>
                                     <th>Сума</th>
                                     <th>Статус</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${orders.map(order => `
-                                    <tr>
-                                        <td>${order.order_number}</td>
+                                ${orders.map(order => {
+                        const items = order.items || [];
+                        const itemsText = items.map(item => {
+                            const product = productMap[item.product_id];
+                            return `${product ? product.name : 'Товар #' + item.product_id} x${item.quantity}`;
+                        }).join(', ');
+
+                        const statusColor = order.status === 'completed' ? 'var(--success)' :
+                            order.status === 'pending' ? 'var(--warning)' : 'var(--text-muted)';
+
+                        return `
+                                    <tr onclick="app.viewOrderDetails(${order.id})" style="cursor: pointer;">
+                                        <td><strong>${order.order_number}</strong></td>
                                         <td>${new Date(order.order_date).toLocaleDateString('uk-UA')}</td>
-                                        <td>${order.total_amount} грн</td>
-                                        <td>${order.status}</td>
+                                        <td style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            ${itemsText || 'Немає товарів'}
+                                        </td>
+                                        <td><strong>${order.total_amount}</strong> грн</td>
+                                        <td><span style="color: ${statusColor};">⬤</span> ${order.status}</td>
                                     </tr>
-                                `).join('')}
+                                `}).join('')}
                             </tbody>
                            </table>`
                     : components.showEmptyState('Поки що немає замовлень', '📦')
@@ -330,6 +397,69 @@ const app = {
             `;
         } catch (error) {
             appEl.innerHTML = `<div class="container">${components.showEmptyState('Помилка завантаження', '❌')}</div>`;
+        }
+    },
+
+    async viewOrderDetails(orderId) {
+        try {
+            const [orders, products] = await Promise.all([
+                api.getOrders({}),
+                api.getProducts({})
+            ]);
+
+            const order = orders.find(o => o.id === orderId);
+            if (!order) {
+                components.showToast('Замовлення не знайдено', 'error');
+                return;
+            }
+
+            const productMap = {};
+            products.forEach(p => productMap[p.id] = p);
+
+            const items = order.items || [];
+
+            const content = `
+                <div>
+                    <h3>Замовлення ${order.order_number}</h3>
+                    <p><strong>Дата:</strong> ${new Date(order.order_date).toLocaleString('uk-UA')}</p>
+                    <p><strong>Статус:</strong> ${order.status}</p>
+                    
+                    <h4 style="margin-top: 2rem;">Товари:</h4>
+                    ${items.length > 0 ? `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Товар</th>
+                                    <th>Ціна</th>
+                                    <th>Кількість</th>
+                                    <th>Сума</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${items.map(item => {
+                const product = productMap[item.product_id];
+                return `
+                                        <tr>
+                                            <td>${product ? product.name : 'Товар #' + item.product_id}</td>
+                                            <td>${item.price} грн</td>
+                                            <td>${item.quantity}</td>
+                                            <td><strong>${item.price * item.quantity}</strong> грн</td>
+                                        </tr>
+                                    `;
+            }).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>Немає товарів</p>'}
+                    
+                    <div style="text-align: right; margin-top: 1rem; padding-top: 1rem; border-top: 2px solid var(--border);">
+                        <h3>Всього: ${order.total_amount} грн</h3>
+                    </div>
+                </div>
+            `;
+
+            components.showModal('📦 Деталі замовлення', content);
+        } catch (error) {
+            components.showToast('Помилка завантаження деталей', 'error');
         }
     },
 
@@ -399,7 +529,7 @@ const app = {
     async checkout() {
         try {
             const orderData = {
-                client_id: 1, // Demo client ID
+                client_id: 1,
                 order_type: 'in_store',
                 payment_method: 'card',
                 items: this.cart.map(item => ({
@@ -414,6 +544,10 @@ const app = {
             this.cart = [];
             this.updateCartCount();
             components.closeModal();
+
+            if (this.currentPage === 'shop') {
+                this.renderShop();
+            }
         } catch (error) {
             components.showToast('Помилка при створенні замовлення', 'error');
         }
@@ -469,9 +603,7 @@ const app = {
             const content = `
                 <div style="text-align: center;">
                     <div style="font-size: 5rem; margin-bottom: 1rem;">
-                        ${trainer.specialization === 'fitness' ? '🏃' :
-                    trainer.specialization === 'gym' ? '🏋️' :
-                        trainer.specialization === 'pool' ? '🏊' : '💆'}
+                        ${this.getTrainerIcon(trainer.specialization)}
                     </div>
                     <h2>${trainer.first_name} ${trainer.last_name}</h2>
                     <p style="color: var(--text-muted);">${trainer.specialization}</p>
@@ -502,6 +634,59 @@ const app = {
         } catch (error) {
             components.showToast('Помилка завантаження даних', 'error');
         }
+    },
+
+    // Simple Service Booking
+    async bookService(serviceId, serviceName, price) {
+        try {
+            const services = await api.getServices();
+            const service = services.find(s => s.id === serviceId);
+            const duration = service ? service.duration_minutes : 60;
+
+            const content = `
+                <div style="max-width: 500px;">
+                    <h3>📅 Бронювання послуги</h3>
+                    <p><strong>Послуга:</strong> ${serviceName}</p>
+                    <p><strong>Ціна:</strong> ${price} грн</p>
+                    <p><strong>Тривалість:</strong> ${duration} хвилин</p>
+                    
+                    <form onsubmit="app.handleBooking(event, '${serviceName}')" style="margin-top: 2rem;">
+                        <div class="form-group">
+                            <label class="form-label">📅 Дата</label>
+                            <input type="date" class="form-input" name="date" required min="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🕐 Час</label>
+                            <input type="time" class="form-input" name="time" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📝 Примітки (опціонально)</label>
+                            <textarea class="form-input" name="notes" rows="3" placeholder="Додаткові побажання..."></textarea>
+                        </div>
+                        <button type="submit" class="btn">✅ Підтвердити бронювання</button>
+                    </form>
+                </div>
+            `;
+
+            components.showModal('📅 Бронювання', content);
+        } catch (error) {
+            components.showToast('Помилка завантаження даних', 'error');
+        }
+    },
+
+    handleBooking(event, serviceName) {
+        event.preventDefault();
+
+        const formData = new FormData(event.target);
+        const bookingNumber = `BK-${Date.now().toString().slice(-6)}`;
+
+        components.showToast(`Бронювання ${bookingNumber} створено!`, 'success');
+        components.closeModal();
+
+        setTimeout(() => {
+            const dateStr = new Date(formData.get('date')).toLocaleDateString('uk-UA');
+            components.showToast(`${serviceName} на ${dateStr} о ${formData.get('time')}`, 'success');
+        }, 1500);
     },
 
     // Authentication
@@ -575,7 +760,6 @@ const app = {
                 return;
             }
 
-            // Save token and user data
             localStorage.setItem('auth_token', response.access_token);
             localStorage.setItem('user_data', JSON.stringify(response.user));
 
@@ -606,7 +790,6 @@ const app = {
                 return;
             }
 
-            // Save token and user data
             localStorage.setItem('auth_token', response.access_token);
             localStorage.setItem('user_data', JSON.stringify(response.user));
 
@@ -634,6 +817,37 @@ const app = {
                 ${components.showEmptyState('Сторінку не знайдено', '🔍')}
             </div>
         `;
+    },
+
+    // Helper methods
+    getProductIcon(category) {
+        const icons = {
+            'supplements': '💊',
+            'equipment': '🏋️',
+            'apparel': '👕',
+            'accessories': '🎒'
+        };
+        return icons[category] || '📦';
+    },
+
+    getServiceIcon(type) {
+        const icons = {
+            'training': '🏋️',
+            'pool': '🏊',
+            'massage': '💆',
+            'consultation': '👨‍⚕️'
+        };
+        return icons[type] || '🎯';
+    },
+
+    getTrainerIcon(specialization) {
+        const icons = {
+            'fitness': '🏃',
+            'gym': '🏋️',
+            'pool': '🏊',
+            'massage': '💆'
+        };
+        return icons[specialization] || '👤';
     }
 };
 

@@ -47,8 +47,26 @@ DEMO_CLIENTS = [
 ]
 
 DEMO_ORDERS = [
-    {"id": 1, "order_number": "ORD-20241201-ABC123", "order_date": "2024-12-01T10:30:00", "total_amount": 1700, "status": "completed"},
-    {"id": 2, "order_number": "ORD-20241202-DEF456", "order_date": "2024-12-02T14:15:00", "total_amount": 450, "status": "pending"},
+    {
+        "id": 1, 
+        "order_number": "ORD-20241201-ABC123", 
+        "order_date": "2024-12-01T10:30:00", 
+        "total_amount": 1700, 
+        "status": "completed",
+        "items": [
+            {"product_id": 1, "quantity": 2, "price": 850}  # 2x Whey Protein
+        ]
+    },
+    {
+        "id": 2, 
+        "order_number": "ORD-20241202-DEF456", 
+        "order_date": "2024-12-02T14:15:00", 
+        "total_amount": 450, 
+        "status": "pending",
+        "items": [
+            {"product_id": 2, "quantity": 1, "price": 450}  # 1x BCAA
+        ]
+    },
 ]
 
 DEMO_USERS = [
@@ -157,11 +175,28 @@ def get_orders():
 
 @app.get("/api/v1/analytics/bestsellers")
 def get_bestsellers():
-    return {"bestsellers": [
-        {"product_id": 1, "sales_count": 45},
-        {"product_id": 2, "sales_count": 32},
-        {"product_id": 3, "sales_count": 28},
-    ]}
+    # Calculate real bestsellers from orders
+    sales_count = {}
+    
+    for order in DEMO_ORDERS:
+        items = order.get("items", [])
+        for item in items:
+            product_id = item.get("product_id")
+            quantity = item.get("quantity", 0)
+            
+            if product_id in sales_count:
+                sales_count[product_id] += quantity
+            else:
+                sales_count[product_id] = quantity
+    
+    # Convert to list and sort by sales count
+    bestsellers = [
+        {"product_id": pid, "sales_count": count}
+        for pid, count in sales_count.items()
+    ]
+    bestsellers.sort(key=lambda x: x["sales_count"], reverse=True)
+    
+    return {"bestsellers": bestsellers}
 
 @app.post("/api/v1/clients")
 def create_client(data: dict):
@@ -187,12 +222,41 @@ def create_order(data: dict):
     # Generate new ID and order number
     new_id = max([o["id"] for o in DEMO_ORDERS]) + 1 if DEMO_ORDERS else 1
     
+    # Get items from request
+    items = data.get("items", [])
+    
+    # Calculate total amount
+    total_amount = 0
+    order_items = []
+    
+    # Update product quantities and build order items
+    for item in items:
+        product_id = item.get("product_id")
+        quantity = item.get("quantity", 1)
+        
+        # Find product and decrease stock
+        for product in DEMO_PRODUCTS:
+            if product["id"] == product_id:
+                product["quantity_in_stock"] -= quantity
+                if product["quantity_in_stock"] < 0:
+                    product["quantity_in_stock"] = 0
+                
+                # Add to order items with price
+                order_items.append({
+                    "product_id": product_id,
+                    "quantity": quantity,
+                    "price": product["price"]
+                })
+                total_amount += product["price"] * quantity
+                break
+    
     new_order = {
         "id": new_id,
         "order_number": f"ORD-20251205-DEMO{new_id}",
-        "order_date": "2025-12-05T18:20:00",
-        "total_amount": 500,
-        "status": "pending"
+        "order_date": "2025-12-05T23:18:00",
+        "total_amount": total_amount,
+        "status": "pending",
+        "items": order_items
     }
     
     # Add to list
