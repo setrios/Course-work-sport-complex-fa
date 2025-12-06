@@ -34,3 +34,9 @@
 - Connect: Username: neo4j | Password: neo4j
 - Set the new password to: neo4jneo4j
 - everything else configured in settigns.py and core
+
+
+### RUN
+---
+/Course-work-sport-complex-fa$ python main.py 
+/Course-work-sport-complex-fa/frontend$ npm run dev

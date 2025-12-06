@@ -27,8 +27,12 @@ app = FastAPI(title="Sport Complex API")
 
 # Auth configuration
 SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+# Validate required environment variables
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable is required. Please set it in your .env file.")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -69,8 +73,6 @@ class ClientDB(Base):
     password_hash = Column(String(255))  # Store hashed password
     # role: 'client', 'trainer', 'admin' — keeps users in one table and allows easy filtering
     role = Column(String(20), default="client", index=True)
-    # trainer specialization (nullable) — used when role == 'trainer'
-    specialization = Column(String(100), nullable=True, index=True)
     subscriptions = relationship("SubscriptionDB", back_populates="client")
 
 
@@ -97,6 +99,8 @@ class TrainingSessionDB(Base):
     scheduled_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     notes = Column(String(255), nullable=True)
+    duration_minutes = Column(Integer, default=60)  # default session duration: 1 hour
+    status = Column(String(20), default="scheduled", index=True)  # scheduled, in_progress, completed, cancelled
 
     trainer = relationship("ClientDB", foreign_keys=[trainer_id])
     client = relationship("ClientDB", foreign_keys=[client_id])
@@ -113,6 +117,17 @@ class ProductDB(Base):
     available = Column(Boolean, default=True, index=True)
 
 
+class SpecializationDB(Base):
+    __tablename__ = "specializations"
+    id = Column(Integer, primary_key=True, index=True)
+    trainer_id = Column(Integer, ForeignKey("clients.id"), index=True)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    trainer = relationship("ClientDB", foreign_keys=[trainer_id])
+    service = relationship("ServiceDB")
+
+
 
 class ClientCreate(BaseModel):
     full_name: str
@@ -124,7 +139,6 @@ class TrainerCreate(BaseModel):
     full_name: str
     email: str
     password: str
-    specialization: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -133,7 +147,7 @@ class UserUpdate(BaseModel):
 
 
 class TrainerUpdate(UserUpdate):
-    specialization: Optional[str] = None
+    pass
 
 class MedicalDocInput(BaseModel):
     client_email: str
@@ -172,6 +186,8 @@ class TrainingSessionOut(BaseModel):
     service_name: Optional[str]
     scheduled_at: datetime
     notes: Optional[str]
+    duration_minutes: int
+    status: str
 
     class Config:
         orm_mode = True
@@ -183,6 +199,7 @@ class TrainingSessionCreate(BaseModel):
     service_id: int
     scheduled_at: Optional[datetime] = None
     notes: Optional[str] = None
+    duration_minutes: Optional[int] = 60
 
 
 class TrainingSessionCreateNoTrainer(BaseModel):
@@ -190,6 +207,7 @@ class TrainingSessionCreateNoTrainer(BaseModel):
     service_id: int
     scheduled_at: Optional[datetime] = None
     notes: Optional[str] = None
+    duration_minutes: Optional[int] = 60
 
 
 class ProductCreate(BaseModel):
@@ -220,6 +238,20 @@ class ProductOut(BaseModel):
         orm_mode = True
 
 
+class SpecializationCreate(BaseModel):
+    service_id: int
+
+
+class SpecializationOut(BaseModel):
+    id: int
+    service_id: int
+    service_name: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
 
 def get_db():
     db = SessionLocal()
@@ -241,14 +273,19 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY is not set. Cannot create access token.")
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    try:
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        return encoded_jwt
+    except Exception as e:
+        raise ValueError(f"Failed to encode JWT token: {str(e)}")
 
 
 def get_user_by_email(db: Session, email: str):
@@ -271,12 +308,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        if not SECRET_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Server configuration error: SECRET_KEY is not set"
+            )
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token validation failed: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user = get_user_by_email(db, email=email)
     if user is None:
         raise credentials_exception
@@ -292,6 +346,28 @@ def require_role(allowed_roles: List[str]):
             )
         return current_user
     return role_checker
+
+
+def calculate_session_status(session: TrainingSessionDB, now: datetime) -> str:
+    """Calculate the current status of a session based on time.
+    
+    Returns:
+    - 'cancelled' if status is already cancelled
+    - 'scheduled' if current time is before scheduled_at
+    - 'in_progress' if current time is between scheduled_at and end_time
+    - 'completed' if current time is after end_time
+    """
+    if session.status == "cancelled":
+        return "cancelled"
+    
+    end_time = session.scheduled_at + timedelta(minutes=session.duration_minutes)
+    
+    if now < session.scheduled_at:
+        return "scheduled"
+    elif now >= session.scheduled_at and now < end_time:
+        return "in_progress"
+    else:
+        return "completed"
 
 
 
@@ -324,19 +400,33 @@ def startup_event():
 
 @app.post("/login", response_model=dict)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Login endpoint - returns JWT token"""
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    """Login endpoint - returns JWT token
+    
+    Use this endpoint to authenticate and get a JWT token.
+    In Swagger UI, click "Authorize" and enter:
+    - username: your email address
+    - password: your password
+    """
+    try:
+        user = authenticate_user(db, form_data.username, form_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email, "role": user.role}, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "role": user.role}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer", "user_id": user.id, "role": user.role}
+        return {"access_token": access_token, "token_type": "bearer", "user_id": user.id, "role": user.role}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
 
 
 @app.get("/me", response_model=dict)
@@ -346,8 +436,7 @@ def get_current_user_info(current_user: ClientDB = Depends(get_current_user)):
         "id": current_user.id,
         "full_name": current_user.full_name,
         "email": current_user.email,
-        "role": current_user.role,
-        "specialization": current_user.specialization if current_user.role == "trainer" else None
+        "role": current_user.role
     }
 
 
@@ -379,7 +468,7 @@ def create_client(client: ClientCreate, db: Session = Depends(get_db)):
 
 @app.post("/trainers/", response_model=dict)
 def create_trainer(trainer: TrainerCreate, db: Session = Depends(get_db)):
-    """Register a new trainer in MySQL (accepts specialization)."""
+    """Register a new trainer in MySQL."""
     # prevent duplicate emails
     existing = db.query(ClientDB).filter(ClientDB.email == trainer.email).first()
     if existing:
@@ -389,18 +478,17 @@ def create_trainer(trainer: TrainerCreate, db: Session = Depends(get_db)):
         full_name=trainer.full_name,
         email=trainer.email,
         password_hash=get_password_hash(trainer.password),
-        role="trainer",
-        specialization=trainer.specialization
+        role="trainer"
     )
     db.add(db_trainer)
     db.commit()
     db.refresh(db_trainer)
 
-    # create corresponding node in Neo4j with Trainer label and specialization
+    # create corresponding node in Neo4j with Trainer label
     with neo4j_driver.session() as session:
         session.run(
-            "MERGE (t:Trainer {mysql_id: $tid, name: $name}) SET t.specialization = $spec",
-            tid=db_trainer.id, name=db_trainer.full_name, spec=db_trainer.specialization
+            "MERGE (t:Trainer {mysql_id: $tid, name: $name})",
+            tid=db_trainer.id, name=db_trainer.full_name
         )
 
     return {"status": "created", "id": db_trainer.id, "name": db_trainer.full_name}
@@ -464,8 +552,8 @@ def create_first_admin(admin: ClientCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/clients/list")
-def list_clients(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    """List all clients - Admin only."""
+def list_clients(current_user: ClientDB = Depends(require_role(["admin", "trainer"])), db: Session = Depends(get_db)):
+    """List all clients - Admin and Trainer access."""
     clients = db.query(ClientDB).filter(ClientDB.role == "client").all()
     return [{
         "id": u.id,
@@ -535,20 +623,19 @@ def delete_client(client_id: int, current_user: ClientDB = Depends(get_current_u
 
 
 @app.get("/trainers/list")
-def list_trainers(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
-    """List all trainers - Admin only."""
+def list_trainers(current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List all trainers - Available to all authenticated users."""
     trainers = db.query(ClientDB).filter(ClientDB.role == "trainer").all()
     return [{
         "id": u.id,
         "full_name": u.full_name,
         "email": u.email,
-        "role": u.role,
-        "specialization": u.specialization
+        "role": u.role
     } for u in trainers]
 
 
 @app.get("/trainers/{trainer_id}")
-def get_trainer(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_trainer_by_id(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Return a single trainer by id - Trainers can only view their own profile, admins can view any."""
     trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
     if not trainer:
@@ -558,7 +645,7 @@ def get_trainer(trainer_id: int, current_user: ClientDB = Depends(get_current_us
     if current_user.role != "admin" and current_user.id != trainer_id:
         raise HTTPException(status_code=403, detail="You can only view your own profile")
 
-    return {"id": trainer.id, "full_name": trainer.full_name, "email": trainer.email, "role": trainer.role, "specialization": trainer.specialization}
+    return {"id": trainer.id, "full_name": trainer.full_name, "email": trainer.email, "role": trainer.role}
 
 
 @app.delete("/trainers/{trainer_id}", response_model=dict)
@@ -687,13 +774,10 @@ def update_trainer(trainer_id: int, data: TrainerUpdate, current_user: ClientDB 
     if data.full_name:
         trainer.full_name = data.full_name
 
-    if data.specialization is not None:
-        trainer.specialization = data.specialization
-
     db.commit()
     db.refresh(trainer)
 
-    return {"status": "updated", "id": trainer.id, "full_name": trainer.full_name, "email": trainer.email, "specialization": trainer.specialization}
+    return {"status": "updated", "id": trainer.id, "full_name": trainer.full_name, "email": trainer.email}
 
 
 @app.put("/admins/{admin_id}")
@@ -757,6 +841,133 @@ def get_trainer_sessions(trainer_id: int, current_user: ClientDB = Depends(get_c
     return result
 
 
+@app.get("/trainers/{trainer_id}/specializations", response_model=List[SpecializationOut])
+def get_trainer_specializations(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return all specializations for a specific trainer.
+    
+    Trainers can view their own specializations, admins can view any trainer's specializations.
+    """
+    trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
+    if not trainer:
+        raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only view their own specializations unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only view your own specializations")
+
+    specializations = db.query(SpecializationDB).filter(SpecializationDB.trainer_id == trainer_id).all()
+    
+    # Include service names in response
+    result = []
+    for spec in specializations:
+        service = db.query(ServiceDB).filter(ServiceDB.id == spec.service_id).first()
+        result.append({
+            "id": spec.id,
+            "service_id": spec.service_id,
+            "service_name": service.name if service else "Unknown",
+            "created_at": spec.created_at
+        })
+    
+    return result
+
+
+@app.post("/trainers/{trainer_id}/specializations", response_model=dict)
+def create_trainer_specialization(trainer_id: int, spec: SpecializationCreate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new specialization for a trainer.
+    
+    Trainers can create specializations for themselves, admins can create for any trainer.
+    Prevents duplicate specializations (same service) for the same trainer.
+    """
+    trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
+    if not trainer:
+        raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only create specializations for themselves unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only create specializations for yourself")
+
+    # Verify service exists
+    service = db.query(ServiceDB).filter(ServiceDB.id == spec.service_id).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    # Check if specialization already exists for this trainer and service
+    existing = db.query(SpecializationDB).filter(
+        SpecializationDB.trainer_id == trainer_id,
+        SpecializationDB.service_id == spec.service_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="You already have this specialization")
+
+    new_spec = SpecializationDB(
+        trainer_id=trainer_id,
+        service_id=spec.service_id
+    )
+    db.add(new_spec)
+    db.commit()
+    db.refresh(new_spec)
+
+    return {"status": "created", "id": new_spec.id, "service_name": service.name}
+
+
+@app.delete("/trainers/{trainer_id}/specializations/{specialization_id}", response_model=dict)
+def delete_trainer_specialization(trainer_id: int, specialization_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a specialization.
+    
+    Trainers can delete their own specializations, admins can delete any.
+    """
+    trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
+    if not trainer:
+        raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Trainers can only delete their own specializations unless they're admin
+    if current_user.role != "admin" and current_user.id != trainer_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own specializations")
+
+    spec = db.query(SpecializationDB).filter(
+        SpecializationDB.id == specialization_id,
+        SpecializationDB.trainer_id == trainer_id
+    ).first()
+    if not spec:
+        raise HTTPException(status_code=404, detail="Specialization not found")
+
+    db.delete(spec)
+    db.commit()
+    
+    # Get service name for response
+    service = db.query(ServiceDB).filter(ServiceDB.id == spec.service_id).first()
+
+    return {"status": "deleted", "id": specialization_id, "service_name": service.name if service else "Unknown"}
+
+
+@app.get("/trainers/{trainer_id}/specialized-services")
+def get_trainer_specialized_services(trainer_id: int, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return services that the trainer is specialized in.
+    
+    This endpoint is used by the frontend to filter service options when trainers create sessions.
+    """
+    trainer = db.query(ClientDB).filter(ClientDB.id == trainer_id, ClientDB.role == "trainer").first()
+    if not trainer:
+        raise HTTPException(status_code=404, detail="Trainer not found")
+    
+    # Get all specializations for this trainer
+    specializations = db.query(SpecializationDB).filter(SpecializationDB.trainer_id == trainer_id).all()
+    
+    # Get the corresponding services
+    services = []
+    for spec in specializations:
+        service = db.query(ServiceDB).filter(ServiceDB.id == spec.service_id).first()
+        if service:
+            services.append({
+                "id": service.id,
+                "name": service.name,
+                "requires_medical": service.requires_medical
+            })
+    
+    return services
+
+
+
 @app.post("/sessions/", response_model=dict)
 def create_session(payload: TrainingSessionCreate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
     """Clients create a training session with a trainer for a service.
@@ -781,6 +992,15 @@ def create_session(payload: TrainingSessionCreate, current_user: ClientDB = Depe
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
+    # If current user is a trainer creating a session, verify they have specialization for this service
+    if current_user.role == "trainer":
+        specialization = db.query(SpecializationDB).filter(
+            SpecializationDB.trainer_id == current_user.id,
+            SpecializationDB.service_id == payload.service_id
+        ).first()
+        if not specialization:
+            raise HTTPException(status_code=403, detail="You are not specialized in this service")
+
     # verify subscription exists for client and service
     sub = db.query(SubscriptionDB).filter(
         SubscriptionDB.client_id == payload.client_id,
@@ -800,7 +1020,9 @@ def create_session(payload: TrainingSessionCreate, current_user: ClientDB = Depe
         client_id=payload.client_id,
         service_id=payload.service_id,
         scheduled_at=scheduled,
-        notes=payload.notes
+        notes=payload.notes,
+        duration_minutes=payload.duration_minutes if payload.duration_minutes else 60,
+        status="scheduled"
     )
     db.add(ts)
     db.commit()
@@ -863,7 +1085,9 @@ def create_unassigned_session(payload: TrainingSessionCreateNoTrainer, current_u
         client_id=payload.client_id,
         service_id=payload.service_id,
         scheduled_at=scheduled,
-        notes=payload.notes
+        notes=payload.notes,
+        duration_minutes=payload.duration_minutes if payload.duration_minutes else 60,
+        status="scheduled"
     )
     db.add(ts)
     db.commit()
@@ -894,7 +1118,8 @@ def delete_client_session(client_id: int, session_id: int, current_user: ClientD
     if current_user.role != "admin" and current_user.id != sess.client_id:
         raise HTTPException(status_code=403, detail="You can only delete your own sessions")
 
-    db.delete(sess)
+    # Mark session as cancelled instead of deleting
+    sess.status = "cancelled"
     db.commit()
 
     # best-effort: try to remove related Neo4j scheduling relationships if possible
@@ -916,7 +1141,7 @@ def delete_client_session(client_id: int, session_id: int, current_user: ClientD
     except Exception:
         pass
 
-    return {"status": "deleted", "session_id": session_id}
+    return {"status": "cancelled", "session_id": session_id}
 
 
 @app.delete("/trainers/{trainer_id}/sessions/{session_id}", response_model=dict)
@@ -930,7 +1155,8 @@ def delete_trainer_session(trainer_id: int, session_id: int, current_user: Clien
     if current_user.role != "admin" and current_user.id != sess.trainer_id:
         raise HTTPException(status_code=403, detail="You can only delete sessions assigned to you")
 
-    db.delete(sess)
+    # Mark session as cancelled instead of deleting
+    sess.status = "cancelled"
     db.commit()
 
     # best-effort: remove Neo4j scheduled relation
@@ -943,7 +1169,7 @@ def delete_trainer_session(trainer_id: int, session_id: int, current_user: Clien
     except Exception:
         pass
 
-    return {"status": "deleted", "session_id": session_id}
+    return {"status": "cancelled", "session_id": session_id}
 
 @app.delete("/sessions/{session_id}", response_model=dict)
 def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id: Optional[int] = None, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -967,8 +1193,8 @@ def delete_session(session_id: int, client_id: Optional[int] = None, trainer_id:
     if trainer_id is not None and sess.trainer_id != trainer_id:
         raise HTTPException(status_code=403, detail="Session does not belong to the specified trainer")
 
-    # delete the session
-    db.delete(sess)
+    # Mark session as cancelled instead of deleting
+    sess.status = "cancelled"
     db.commit()
 
     # best-effort: clean up Neo4j scheduling relationships
@@ -1012,30 +1238,67 @@ def get_user_dashboard(user_id: int, current_user: ClientDB = Depends(get_curren
 
     now = datetime.utcnow()
 
-    # Sessions where user is the client
-    sessions = db.query(TrainingSessionDB).filter(TrainingSessionDB.client_id == user_id).all()
-    upcoming = []
-    completed = []
+    # Query sessions based on user role
+    # For trainers: show sessions where they are the trainer
+    # For clients: show sessions where they are the client
+    if user.role == "trainer":
+        sessions = db.query(TrainingSessionDB).filter(TrainingSessionDB.trainer_id == user_id).all()
+    else:
+        sessions = db.query(TrainingSessionDB).filter(TrainingSessionDB.client_id == user_id).all()
+    
+    # Group sessions by calculated status
+    scheduled_sessions = []
+    in_progress_sessions = []
+    completed_sessions = []
+    cancelled_sessions = []
+    
     for s in sessions:
-        trainer = db.query(ClientDB).filter(ClientDB.id == s.trainer_id).first()
         service = None
         if s.service_id:
             service = db.query(ServiceDB).filter(ServiceDB.id == s.service_id).first()
 
-        entry = {
-            "id": s.id,
-            "trainer_id": s.trainer_id,
-            "trainer_name": trainer.full_name if trainer else None,
-            "trainer_email": trainer.email if trainer else None,
-            "service_name": service.name if service else None,
-            "scheduled_at": s.scheduled_at,
-            "notes": s.notes
-        }
+        # Calculate current status
+        current_status = calculate_session_status(s, now)
 
-        if s.scheduled_at and s.scheduled_at >= now:
-            upcoming.append(entry)
+        # Build entry based on user role
+        if user.role == "trainer":
+            # Trainers see client information
+            client = db.query(ClientDB).filter(ClientDB.id == s.client_id).first()
+            entry = {
+                "id": s.id,
+                "client_id": s.client_id,
+                "client_name": client.full_name if client else None,
+                "client_email": client.email if client else None,
+                "service_name": service.name if service else None,
+                "scheduled_at": s.scheduled_at,
+                "notes": s.notes,
+                "duration_minutes": s.duration_minutes,
+                "status": current_status
+            }
         else:
-            completed.append(entry)
+            # Clients see trainer information
+            trainer = db.query(ClientDB).filter(ClientDB.id == s.trainer_id).first()
+            entry = {
+                "id": s.id,
+                "trainer_id": s.trainer_id,
+                "trainer_name": trainer.full_name if trainer else None,
+                "trainer_email": trainer.email if trainer else None,
+                "service_name": service.name if service else None,
+                "scheduled_at": s.scheduled_at,
+                "notes": s.notes,
+                "duration_minutes": s.duration_minutes,
+                "status": current_status
+            }
+
+        # Group by status
+        if current_status == "scheduled":
+            scheduled_sessions.append(entry)
+        elif current_status == "in_progress":
+            in_progress_sessions.append(entry)
+        elif current_status == "completed":
+            completed_sessions.append(entry)
+        elif current_status == "cancelled":
+            cancelled_sessions.append(entry)
 
     # Subscriptions for this user
     subs = db.query(SubscriptionDB).filter(SubscriptionDB.client_id == user_id).all()
@@ -1075,12 +1338,28 @@ def get_user_dashboard(user_id: int, current_user: ClientDB = Depends(get_curren
         except Exception:
             medical_doc = None
 
+    # Specializations for trainers
+    specializations = []
+    if user.role == "trainer":
+        specs = db.query(SpecializationDB).filter(SpecializationDB.trainer_id == user_id).all()
+        for spec in specs:
+            service = db.query(ServiceDB).filter(ServiceDB.id == spec.service_id).first()
+            specializations.append({
+                "id": spec.id,
+                "service_id": spec.service_id,
+                "service_name": service.name if service else "Unknown",
+                "created_at": spec.created_at
+            })
+
     return {
         "user": {"id": user.id, "full_name": user.full_name, "email": user.email, "role": user.role},
-        "upcoming_sessions": upcoming,
-        "completed_sessions": completed,
+        "scheduled_sessions": scheduled_sessions,
+        "in_progress_sessions": in_progress_sessions,
+        "completed_sessions": completed_sessions,
+        "cancelled_sessions": cancelled_sessions,
         "subscriptions": subscriptions,
-        "latest_medical_doc": medical_doc
+        "latest_medical_doc": medical_doc,
+        "specializations": specializations
     }
 
 
@@ -1130,6 +1409,63 @@ def list_products(db: Session = Depends(get_db)):
         {"id": p.id, "name": p.name, "price": p.price, "stock": p.stock, "description": p.description, "available": p.available}
         for p in prods
     ]
+@app.get("/admin/sessions/", response_model=dict)
+def get_all_sessions_admin(current_user: ClientDB = Depends(require_role(["admin"])), db: Session = Depends(get_db)):
+    """
+    Get all sessions grouped by status for admin dashboard.
+    """
+    now = datetime.utcnow()
+    sessions = db.query(TrainingSessionDB).order_by(TrainingSessionDB.scheduled_at.desc()).all()
+    
+    # Group sessions by calculated status
+    scheduled_sessions = []
+    in_progress_sessions = []
+    completed_sessions = []
+    cancelled_sessions = []
+    
+    for s in sessions:
+        service = None
+        if s.service_id:
+            service = db.query(ServiceDB).filter(ServiceDB.id == s.service_id).first()
+
+        # Calculate current status
+        current_status = calculate_session_status(s, now)
+
+        # Build entry
+        client = db.query(ClientDB).filter(ClientDB.id == s.client_id).first()
+        trainer = db.query(ClientDB).filter(ClientDB.id == s.trainer_id).first()
+        
+        entry = {
+            "id": s.id,
+            "client_id": s.client_id,
+            "client_name": client.full_name if client else None,
+            "client_email": client.email if client else None,
+            "trainer_id": s.trainer_id,
+            "trainer_name": trainer.full_name if trainer else None,
+            "trainer_email": trainer.email if trainer else None,
+            "service_name": service.name if service else None,
+            "scheduled_at": s.scheduled_at,
+            "notes": s.notes,
+            "duration_minutes": s.duration_minutes,
+            "status": current_status
+        }
+
+        # Group by status
+        if current_status == "scheduled":
+            scheduled_sessions.append(entry)
+        elif current_status == "in_progress":
+            in_progress_sessions.append(entry)
+        elif current_status == "completed":
+            completed_sessions.append(entry)
+        elif current_status == "cancelled":
+            cancelled_sessions.append(entry)
+
+    return {
+        "scheduled_sessions": scheduled_sessions,
+        "in_progress_sessions": in_progress_sessions,
+        "completed_sessions": completed_sessions,
+        "cancelled_sessions": cancelled_sessions
+    }
 
     # populate cache (best-effort)
     try:
@@ -1386,7 +1722,7 @@ def submit_medical_doc(doc: MedicalDocInput, current_user: ClientDB = Depends(ge
 
 
 @app.post("/cancel-subscription/")
-def cancel_subscription(cancel_data: SubscriptionCancel, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+def cancel_subscription(cancel_data: SubscriptionCancel, current_user: ClientDB = Depends(require_role(["client", "admin"])), db: Session = Depends(get_db)):
     """
     Скасування підписки на послугу.
     Видаляє запис з MySQL і видаляє зв'язок з Neo4j.
@@ -1430,7 +1766,7 @@ def cancel_subscription(cancel_data: SubscriptionCancel, current_user: ClientDB 
 
 
 @app.post("/subscriptions/", response_model=dict)
-def create_subscription(sub_data: SubscriptionCreate, current_user: ClientDB = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_subscription(sub_data: SubscriptionCreate, current_user: ClientDB = Depends(require_role(["client", "admin"])), db: Session = Depends(get_db)):
     """Create a new subscription (alias for /subscribe/ endpoint).
     
     Validates:
