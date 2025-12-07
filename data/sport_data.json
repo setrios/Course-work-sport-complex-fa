@@ -1,0 +1,263 @@
+{
+  "clients": [
+    {
+      "full_name": "Ірина Коваль",
+      "birth_date": "1991-04-12",
+      "gender": "FEMALE",
+      "contact_info": {
+        "phone": "+380671234567",
+        "email": "iryna.koval@example.com",
+        "address": "м. Київ, вул. Спортивна, 5"
+      },
+      "username": "iryna.koval",
+      "password": "iryna123",
+      "has_valid_cert": false,
+      "client_id": 1
+    },
+    {
+      "full_name": "Петро Мельник",
+      "birth_date": "1988-09-03",
+      "gender": "MALE",
+      "contact_info": {
+        "phone": "+380501112233",
+        "email": "petro.melnyk@example.com",
+        "address": "м. Львів, просп. Свободи, 21"
+      },
+      "username": "petro.melnyk",
+      "password": "petro123",
+      "has_valid_cert": false,
+      "client_id": 2
+    },
+    {
+      "full_name": "Марія Левченко",
+      "birth_date": "1995-12-20",
+      "gender": "FEMALE",
+      "contact_info": {
+        "phone": "+380931234890",
+        "email": "mariya.levchenko@example.com",
+        "address": "м. Харків, вул. Наукова, 10"
+      },
+      "username": "mariya.levchenko",
+      "password": "mariya123",
+      "has_valid_cert": false,
+      "client_id": 3
+    },
+    {
+      "full_name": "Іван петренко",
+      "birth_date": "2025-12-01",
+      "gender": "MALE",
+      "contact_info": {
+        "phone": "456456",
+        "email": "ivan@exmpl.com",
+        "address": null
+      },
+      "username": "IPP",
+      "has_valid_cert": false,
+      "client_id": 5,
+      "password": "111111"
+    },
+    {
+      "full_name": "Богдан Бородка",
+      "birth_date": "2006-02-14",
+      "gender": "MALE",
+      "contact_info": {
+        "phone": "88005553535",
+        "email": "obo@lll.kpi.ua",
+        "address": null
+      },
+      "username": "BBorodka",
+      "has_valid_cert": false,
+      "client_id": 6,
+      "password": "111111"
+    }
+  ],
+  "trainers": [
+    {
+      "full_name": "Олександр Іванович",
+      "specialization": "Фітнес",
+      "birth_date": "1985-06-15",
+      "contact_info": {
+        "phone": "+380661234567",
+        "email": "oleksandr.ivanov@example.com"
+      },
+      "trainer_id": 1
+    },
+    {
+      "full_name": "Світлана Романова",
+      "specialization": "Йога та флексібільність",
+      "birth_date": "1992-07-25",
+      "contact_info": {
+        "phone": "+380961234567",
+        "email": "svitlana@example.com"
+      },
+      "trainer_id": 3
+    },
+    {
+      "full_name": "Андрій Попов",
+      "specialization": "Кардіо та марафонський біг",
+      "birth_date": "1988-01-15",
+      "contact_info": {
+        "phone": "+380971234567",
+        "email": "andrey.popov@example.com"
+      },
+      "trainer_id": 4
+    },
+    {
+      "full_name": "Олег Болобан",
+      "specialization": "Плавання",
+      "birth_date": "1982-03-20",
+      "contact_info": {
+        "phone": "+380951357924",
+        "email": "oleg.boloban@example.com"
+      },
+      "trainer_id": 6
+    },
+    {
+      "full_name": "Дмитро Силенко",
+      "specialization": "Фітнес і силові тренування",
+      "birth_date": "1985-03-10",
+      "contact_info": {
+        "phone": "+380951234567",
+        "email": "dmitro@example.com"
+      },
+      "trainer_id": 7
+    }
+  ],
+  "services": [
+    {
+      "service_name": "Персональна тренування",
+      "price": 150.0,
+      "requires_medical_certificate": true,
+      "is_active": true,
+      "service_id": 1
+    },
+    {
+      "service_name": "Персональна тренування (1 година)",
+      "price": 300.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 2
+    },
+    {
+      "service_name": "Групова тренування з фітнесу",
+      "price": 100.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 3
+    },
+    {
+      "service_name": "Йога клас",
+      "price": 80.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 4
+    },
+    {
+      "service_name": "Цільова тренування (спеціалізована)",
+      "price": 250.0,
+      "requires_medical_certificate": true,
+      "is_active": true,
+      "service_id": 5
+    },
+    {
+      "service_name": "Реабілітаційна тренування",
+      "price": 200.0,
+      "requires_medical_certificate": true,
+      "is_active": true,
+      "service_id": 6
+    },
+    {
+      "service_name": "Бизнес-фитнес",
+      "price": 300.0,
+      "requires_medical_certificate": false,
+      "is_active": false,
+      "service_id": 7
+    },
+    {
+      "service_name": "CrossFit інтенсив",
+      "price": 220.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 8
+    },
+    {
+      "service_name": "Пілатес для спини",
+      "price": 140.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 9
+    },
+    {
+      "service_name": "Бизнес фитнес",
+      "price": 130.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 10
+    },
+    {
+      "service_name": "WWW",
+      "price": 660.0,
+      "requires_medical_certificate": false,
+      "is_active": true,
+      "service_id": 11
+    }
+  ],
+  "memberships": [
+    {
+      "client_id": 1,
+      "start_date": "2025-01-01",
+      "end_date": "2025-12-31",
+      "status": "active",
+      "membership_id": 1,
+      "subscription_type": "MONTHLY",
+      "price": 500
+    },
+    {
+      "client_id": 2,
+      "start_date": "2025-12-01",
+      "end_date": "2025-12-06",
+      "status": "active",
+      "membership_id": 2,
+      "subscription_type": "UNLIMITED",
+      "price": 1000
+    },
+    {
+      "client_id": 6,
+      "start_date": "2025-12-01",
+      "end_date": "2025-12-15",
+      "status": "active",
+      "membership_id": 3,
+      "subscription_type": "MONTHLY",
+      "price": 1500
+    }
+  ],
+  "bookings": [
+    {
+      "client_id": 5,
+      "service_id": 6,
+      "booking_date": "1233-12-12",
+      "status": "confirmed",
+      "service_name": "Реабілітаційна тренування",
+      "price": 200.0,
+      "booking_id": 2
+    },
+    {
+      "client_id": 6,
+      "service_id": 2,
+      "booking_date": "2004-12-02",
+      "status": "confirmed",
+      "service_name": "Персональна тренування (1 година)",
+      "price": 300.0,
+      "booking_id": 3
+    }
+  ],
+  "visits": [],
+  "counters": {
+    "client": 7,
+    "trainer": 8,
+    "service": 12,
+    "membership": 4,
+    "visit": 1,
+    "booking": 5
+  }
+}

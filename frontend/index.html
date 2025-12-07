@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Спорткомплекс - Управління</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Login Screen (before authentication) -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-container">
+            <div class="login-box">
+                <h1 style="text-align: center; margin-bottom: 1rem; color: var(--primary-color);">⚽ Спорткомплекс</h1>
+                <h2 style="text-align: center; margin-bottom: 2rem; color: var(--text-color);">Управління Спорткомплексом</h2>
+                
+                <!-- LOGIN FORM -->
+                <div id="loginForm">
+                    <form onsubmit="event.preventDefault(); login();">
+                        <div class="form-group">
+                            <label for="loginUsername">Користувач:</label>
+                            <input type="text" id="loginUsername" placeholder="Введіть ім'я користувача" required autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label for="loginPassword">Пароль:</label>
+                            <input type="password" id="loginPassword" placeholder="Введіть пароль" required>
+                        </div>
+                        <button type="submit" class="btn-primary" style="width: 100%; padding: 0.8rem; font-size: 1rem;">Увійти</button>
+                    </form>
+                    
+                    <div id="loginError" style="display: none; margin-top: 1rem; padding: 1rem; background: #fadbd8; color: #c0392b; border-radius: 5px;"></div>
+                </div>
+
+                <p style="text-align: center; margin-top: 2rem; font-size: 0.9rem; color: #7f8c8d;">
+                    <strong>Тестові облікові записи:</strong><br>
+                    Адміністратор: admin / admin123<br>
+                    Користувач: user / user123<br>
+                    <em style="font-size: 0.85rem; color: #95a5a6;">(Реєстрація доступна тільки адміністраторам)</em>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header (visible after authentication) -->
+    <header id="header" style="display: none;">
+        <div class="header-container">
+            <div class="logo">
+                <h1>⚽ Спорткомплекс</h1>
+            </div>
+            <div class="auth-section">
+                <div id="authStatus" class="auth-status authenticated">✅ Авторизовано</div>
+                <button id="logoutBtn" class="btn-danger" onclick="logout()">Вихід</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container (visible after authentication) -->
+    <div id="mainContainer" class="container" style="display: none;">
+        <!-- Navigation - USER ONLY -->
+        <nav id="userNav" style="display: none;">
+            <ul>
+                <li><button class="active" data-page="home" onclick="switchPage('home')">🏠 Головна</button></li>
+                <li><button data-page="services" onclick="switchPage('services')">🎯 Послуги</button></li>
+                <li><button data-page="myBookings" onclick="switchPage('myBookings')">🎫 Мої бронювання</button></li>
+                <li><button data-page="profile" onclick="switchPage('profile')">👤 Мій профіль</button></li>
+            </ul>
+        </nav>
+
+        <!-- Navigation - ADMIN ONLY -->
+        <nav id="adminNav" style="display: none;">
+            <ul>
+                <li><button class="active" data-page="home" onclick="switchPage('home')">🏠 Головна</button></li>
+                <li><button data-page="statistics" onclick="switchPage('statistics')">📊 Статистика</button></li>
+                <li><button data-page="clients" onclick="switchPage('clients')">👥 Клієнти</button></li>
+                <li><button data-page="trainers" onclick="switchPage('trainers')">💪 Тренери</button></li>
+                <li><button data-page="services" onclick="switchPage('services')">🎯 Послуги</button></li>
+                <li><button data-page="inventory" onclick="switchPage('inventory')">📦 Товари</button></li>
+                <li><button data-page="memberships" onclick="switchPage('memberships')">🎫 Абонементи</button></li>
+                <li><button data-page="analytics" onclick="switchPage('analytics')">📈 Аналітика</button></li>
+                <li><button data-page="dbqueries" onclick="switchPage('dbqueries')">🔍 Запити БД</button></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+
+            <!-- ========================================
+                 USER HOME PAGE
+                 ======================================== -->
+            <div id="homePageUser" class="page active" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>👋 Ласкаво просимо до Спорткомплексу</h2>
+                    </div>
+                    <div class="card-body">
+                        <p>Ви в системі спорткомплексу. Тут ви можете:</p>
+                        <ul style="margin-left: 2rem; margin-top: 1rem; line-height: 2;">
+                            <li>📅 Переглядати доступні послуги</li>
+                            <li>🎫 Бронювати тренування та послуги</li>
+                            <li>💪 Керувати своїми тренуваннями</li>
+                            <li>👤 Редагувати свій профіль</li>
+                            <li>📊 Переглядати свою статистику</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- User Stats Grid -->
+                <div class="stats-grid" style="margin-top: 2rem;">
+                    <div class="stat-card">
+                        <h3>Мої активні бронювання</h3>
+                        <div class="value" id="userBookings">0</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #27ae60 0%, #16a085 100%);">
+                        <h3>Тренувань цього місяця</h3>
+                        <div class="value" id="userTrainings">0</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                        <h3>Мій статус членства</h3>
+                        <div class="value" id="userMembershipStatus">Нема</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);">
+                        <h3>Залишилось днів</h3>
+                        <div class="value" id="userDaysLeft">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========================================
+                 ADMIN HOME PAGE
+                 ======================================== -->
+            <div id="homePageAdmin" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>👋 Ласкаво просимо, Адміністраторе</h2>
+                    </div>
+                    <div class="card-body">
+                        <p>Панель управління спорткомплексом:</p>
+                        <ul style="margin-left: 2rem; margin-top: 1rem; line-height: 2;">
+                            <li>✅ Повний контроль над клієнтами та профілями</li>
+                            <li>✅ Управління тренерами та персоналом</li>
+                            <li>✅ Каталог послуг та цін</li>
+                            <li>✅ Система абонементів та членства</li>
+                            <li>✅ Реєстрація відвідувань та сеансів</li>
+                            <li>✅ Запити до товарного асортименту</li>
+                            <li>✅ Детальна статистика та аналітика</li>
+                            <li>✅ Керування платежами</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Admin Stats Grid -->
+                <div class="stats-grid" style="margin-top: 2rem;">
+                    <div class="stat-card">
+                        <h3>Загальна кількість клієнтів</h3>
+                        <div class="value" id="adminTotalClients">127</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #27ae60 0%, #16a085 100%);">
+                        <h3>Активних членів</h3>
+                        <div class="value" id="adminActiveMembers">84</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                        <h3>Тренерів в штаті</h3>
+                        <div class="value" id="adminTrainers">12</div>
+                    </div>
+                    <div class="stat-card" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);">
+                        <h3>Дохід цього місяця</h3>
+                        <div class="value" id="adminMonthlyRevenue">₴45,500</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========================================
+                 USER: SERVICES PAGE
+                 ======================================== -->
+            <div id="servicesPageUser" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🎯 Доступні послуги</h2>
+                        <div style="margin-top: 0.5rem;">
+                            <input type="text" id="serviceSearchUser" placeholder="🔍 Пошук послуг..." style="padding: 0.5rem; width: 300px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                    </div>
+
+                    <div id="userServicesGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+                        <div class="service-card">
+                            <h3>Базовий фітнес</h3>
+                            <p style="color: #7f8c8d; margin: 0.5rem 0;">⏱️ 60 хвилин</p>
+                            <p style="color: #27ae60; font-weight: bold; font-size: 1.2rem; margin: 1rem 0;">₴150</p>
+                            <p style="color: #7f8c8d; font-size: 0.9rem;">Базові тренування з навантаженням для новачків</p>
+                            <button class="btn-success" style="width: 100%; margin-top: 1rem;" onclick="bookService('Базовий фітнес', 150)">📅 Забронювати</button>
+                        </div>
+                    </div>
+                    <table style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>Назва</th>
+                                <th>Складність</th>
+                                <th>Тривалість</th>
+                                <th>Ціна</th>
+                                <th>Дія</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userServicesTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ========================================
+                 USER: MY BOOKINGS PAGE
+                 ======================================== -->
+            <div id="myBookingsPage" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🎫 Мої бронювання</h2>
+                    </div>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Послуга</th>
+                                <th>Дата</th>
+                                <th>Тренер</th>
+                                <th>Статус</th>
+                                <th>Дія</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userBookingsTable">
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 2rem;">Немає активних бронювань</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ========================================
+                 USER: PROFILE PAGE
+                 ======================================== -->
+            <div id="profilePage" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>👤 Мій профіль</h2>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1.5rem;">
+                        <div>
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">Персональна інформація</h3>
+                            <div class="form-group">
+                                <label>Ім'я користувача:</label>
+                                <p id="profileUsername" style="font-weight: bold; color: #2c3e50;">-</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Email:</label>
+                                <input type="email" id="profileEmail" placeholder="your@email.com" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 5px; width: 100%;">
+                            </div>
+                            <div class="form-group">
+                                <label>Телефон:</label>
+                                <input type="tel" id="profilePhone" placeholder="+380-50-123-4567" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 5px; width: 100%;">
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">Статистика членства</h3>
+                            <div class="form-group">
+                                <label>Статус:</label>
+                                <p id="profileMembershipStatus" style="font-weight: bold; color: #27ae60;">Активний ✅</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Тип абонемента:</label>
+                                <p id="profileMembershipType" style="font-weight: bold;">Стандартний</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Ціна:</label>
+                                <p id="profileMembershipPrice" style="font-weight: bold;">-</p>
+                            </div>
+                            <div class="form-group">
+                                <label>Залишилось днів:</label>
+                                <p id="profileDaysLeft" style="font-weight: bold; font-size: 1.2rem; color: #f39c12;">35 днів</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary" style="margin-top: 1.5rem;" onclick="updateUserProfile()">💾 Зберегти зміни</button>
+                </div>
+            </div>
+
+            <!-- ========================================
+                 ADMIN: STATISTICS PAGE
+                 ======================================== -->
+            <div id="statisticsPage" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📊 Статистика</h2>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h3>Клієнти цього місяця</h3>
+                            <div class="value" id="statsNewClientsMonth">+12</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);">
+                            <h3>Середня відвідуваність</h3>
+                            <div class="value" id="statsAvgAttendance">72%</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);">
+                            <h3>Популярна послуга</h3>
+                            <div class="value" id="statsTopService" style="font-size: 0.9rem;">Фітнес</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);">
+                            <h3>Утримання членів</h3>
+                            <div class="value" id="statsRetention">94%</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <div class="card">
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📈 Дохід за останні 6 місяців</h3>
+                            <div style="height: 200px; background: #f9f9f9; border-radius: 5px; display: flex; align-items: flex-end; justify-content: space-around; padding: 1rem;">
+                                <div style="background: var(--primary-color); height: 60%; width: 12%; border-radius: 5px;"></div>
+                                <div style="background: var(--primary-color); height: 75%; width: 12%; border-radius: 5px;"></div>
+                                <div style="background: var(--primary-color); height: 85%; width: 12%; border-radius: 5px;"></div>
+                                <div style="background: var(--primary-color); height: 72%; width: 12%; border-radius: 5px;"></div>
+                                <div style="background: var(--primary-color); height: 90%; width: 12%; border-radius: 5px;"></div>
+                                <div style="background: var(--primary-color); height: 100%; width: 12%; border-radius: 5px;"></div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">👥 Розподіл клієнтів</h3>
+                            <ul style="list-style: none; margin-top: 1rem;">
+                                <li style="padding: 0.5rem; display: flex; justify-content: space-between;">
+                                    <span>🟩 Активні члени:</span> <strong>84 (66%)</strong>
+                                </li>
+                                <li style="padding: 0.5rem; display: flex; justify-content: space-between;">
+                                    <span>🟨 Без абонемента:</span> <strong>26 (20%)</strong>
+                                </li>
+                                <li style="padding: 0.5rem; display: flex; justify-content: space-between;">
+                                    <span>🟥 Припинили членство:</span> <strong>17 (14%)</strong>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN: CLIENTS PAGE -->
+            <div id="clientsPage" class="page" style="display: none;">
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>👥 Управління клієнтами</h2>
+                        <button class="btn-primary" onclick="document.getElementById('clientForm').style.display = document.getElementById('clientForm').style.display === 'none' ? 'block' : 'none'">+ Новий клієнт</button>
+                    </div>
+
+                    <!-- Add Client Form -->
+                    <form id="clientForm" style="display: none; background: #f9f9f9; padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;">
+                        <h3>Додавання нового клієнта</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="clientName">ПІБ *</label>
+                                <input type="text" id="clientName" placeholder="Іван Петренко" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="clientBirthDate">Дата народження *</label>
+                                <input type="date" id="clientBirthDate" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="clientPhone">Телефон</label>
+                                <input type="text" id="clientPhone" placeholder="+380-50-123-4567">
+                            </div>
+                            <div class="form-group">
+                                <label for="clientEmail">Email</label>
+                                <input type="email" id="clientEmail" placeholder="ivan@example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="clientUsername">Ім'я користувача *</label>
+                                <input type="text" id="clientUsername" placeholder="ivan_petrenko" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="clientPassword">Пароль *</label>
+                                <input type="password" id="clientPassword" placeholder="Мінімум 6 символів" required minlength="6">
+                            </div>
+                        </div>
+                        <button type="button" class="btn-success" onclick="createClient()">Додати клієнта</button>
+                    </form>
+
+                    <!-- Clients Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ПІБ</th>
+                                <th>Дата народження</th>
+                                <th>Телефон</th>
+                                <th>Email</th>
+                                <th>Дії</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsTable">
+                            <tr><td colspan="5" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Edit Client Modal -->
+                    <div id="editClientModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+                        <div style="background: white; padding: 1.25rem; border-radius: 8px; max-width: 520px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-height: 90vh; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <h3 style="margin: 0;">Редагувати клієнта</h3>
+                                <button type="button" style="background: none; border: none; font-size: 1.35rem; cursor: pointer; color: #999;" onclick="closeEditModal()">×</button>
+                            </div>
+                            
+                            <form id="editClientForm" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                <div class="form-group">
+                                    <label for="editClientName">ПІБ *</label>
+                                    <input type="text" id="editClientName" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientBirthDate">Дата народження *</label>
+                                    <input type="date" id="editClientBirthDate" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientPhone">Телефон</label>
+                                    <input type="text" id="editClientPhone" placeholder="+380-50-123-4567">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientEmail">Email</label>
+                                    <input type="email" id="editClientEmail" placeholder="ivan@example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientUsername">Ім'я користувача *</label>
+                                    <input type="text" id="editClientUsername" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientPassword">Пароль (залишити порожним щоб не змінювати)</label>
+                                    <input type="password" id="editClientPassword" placeholder="Мінімум 6 символів" minlength="6">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editClientGender">Стать</label>
+                                    <select id="editClientGender">
+                                        <option value="MALE">Чоловік</option>
+                                        <option value="FEMALE">Жінка</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; gap: 0.6rem; margin-top: 0.5rem;">
+                                    <button type="button" class="btn-success" style="flex: 1;" onclick="updateClient()">Зберегти</button>
+                                    <button type="button" class="btn-danger" style="flex: 1;" onclick="confirmDeleteClient()">Видалити</button>
+                                    <button type="button" class="btn-secondary" style="flex: 1;" onclick="closeEditModal()">Скасувати</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TRAINERS PAGE -->
+            <div id="trainersPage" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>💪 Управління тренерами</h2>
+                        <button class="btn-primary" onclick="document.getElementById('trainerForm').style.display = document.getElementById('trainerForm').style.display === 'none' ? 'block' : 'none'">+ Новий тренер</button>
+                    </div>
+
+                    <!-- Add Trainer Form -->
+                    <form id="trainerForm" style="display: none; background: #f9f9f9; padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;" onsubmit="event.preventDefault(); createTrainer();">
+                        <h3>Додавання нового тренера</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="trainerName">ПІБ *</label>
+                                <input type="text" id="trainerName" placeholder="Сергій Коваленко" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="trainerSpec">Спеціалізація *</label>
+                                <input type="text" id="trainerSpec" placeholder="Фітнес, Йога, Плавання" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="trainerRate">Оклад/год (₴) *</label>
+                                <input type="number" id="trainerRate" placeholder="300" min="0" step="10" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="trainerPhone">Телефон</label>
+                                <input type="text" id="trainerPhone" placeholder="+380-50-987-6543">
+                            </div>
+                            <div class="form-group">
+                                <label for="trainerEmail">Email</label>
+                                <input type="email" id="trainerEmail" placeholder="trainer@example.com">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-success">Додати тренера</button>
+                    </form>
+
+                    <!-- Trainers Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ПІБ</th>
+                                <th>Спеціалізація</th>
+                                <th>Телефон</th>
+                                <th>Email</th>
+                                <th>Дії</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trainersTable">
+                            <tr><td colspan="5" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SERVICES PAGE -->
+            <div id="servicesPage" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🎯 Управління послугами</h2>
+                        <button class="btn-primary" onclick="document.getElementById('serviceForm').style.display = document.getElementById('serviceForm').style.display === 'none' ? 'block' : 'none'">+ Нова послуга</button>
+                    </div>
+
+                    <!-- Add Service Form -->
+                    <form id="serviceForm" style="display: none; background: #f9f9f9; padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;" onsubmit="event.preventDefault(); createService();">
+                        <h3>Додавання нової послуги</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="serviceName">Назва послуги *</label>
+                                <input type="text" id="serviceName" placeholder="Базовий фітнес" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="serviceDuration">Тривалість (хв) *</label>
+                                <input type="number" id="serviceDuration" placeholder="60" min="15" step="15" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="servicePrice">Ціна за відвідування (₴) *</label>
+                                <input type="number" id="servicePrice" placeholder="150" min="0" step="10" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-success">Додати послугу</button>
+                    </form>
+
+                    <!-- Services Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Назва</th>
+                                <th>Ціна</th>
+                                <th>Статус</th>
+                                <th>Дії</th>
+                            </tr>
+                        </thead>
+                        <tbody id="servicesTable">
+                            <tr><td colspan="4" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ADMIN: INVENTORY (PRODUCTS) PAGE -->
+            <div id="inventoryPage" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📦 Товарний асортимент</h2>
+                        <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="inventorySearch" placeholder="🔍 Пошук товарів..." style="padding: 0.5rem; width: 300px; border: 1px solid #ddd; border-radius: 5px;">
+                            <button class="btn-primary" onclick="showInventoryForm()">📦 Новий товар</button>
+                            <button class="btn-info" onclick="syncProductsWithDB()" title="Синхронізувати товари з базою даних асортименту">🔄 Синхронізація з БД</button>
+                        </div>
+                    </div>
+
+                    <!-- Add Product Form -->
+                    <div id="inventoryForm" style="display: none; background: #f9f9f9; padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;">
+                        <h3>Додавання нового товару</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="productArticle">Артикул *</label>
+                                <input type="text" id="productArticle" placeholder="SKU-12345" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productName">Назва товару *</label>
+                                <input type="text" id="productName" placeholder="Гантель 5кг" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productCategory">Категорія *</label>
+                                <select id="productCategory" required>
+                                    <option value="">Завантаження...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="productPrice">Ціна (₴) *</label>
+                                <input type="number" id="productPrice" placeholder="450" min="0" step="10" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productQuantity">Кількість *</label>
+                                <input type="number" id="productQuantity" placeholder="50" min="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="productSupplier">Постачальник *</label>
+                                <select id="productSupplier" required>
+                                    <option value="">Завантаження...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button class="btn-success" onclick="addProduct()">➕ Додати товар</button>
+                    </div>
+
+                    <!-- Edit Product Modal -->
+                    <div id="editProductModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+                        <div style="background: white; padding: 1.25rem; border-radius: 8px; max-width: 520px; width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-height: 90vh; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <h3 style="margin: 0;">Редагувати товар</h3>
+                                <button type="button" style="background: none; border: none; font-size: 1.35rem; cursor: pointer; color: #999;" onclick="closeEditProductModal()">×</button>
+                            </div>
+                            
+                            <form id="editProductForm" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                <div class="form-group">
+                                    <label for="editProductArticle">Артикул *</label>
+                                    <input type="text" id="editProductArticle" readonly style="background: #f0f0f0;">
+                                </div>
+                                <div class="form-group">
+                                    <label for="editProductName">Назва товару *</label>
+                                    <input type="text" id="editProductName" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editProductCategory">Категорія *</label>
+                                    <select id="editProductCategory" required>
+                                        <option value="">Завантаження...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editProductPrice">Ціна (₴) *</label>
+                                    <input type="number" id="editProductPrice" min="0" step="0.01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editProductQuantity">Кількість *</label>
+                                    <input type="number" id="editProductQuantity" min="0" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="editProductSupplier">Постачальник *</label>
+                                    <select id="editProductSupplier" required>
+                                        <option value="">Завантаження...</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; gap: 0.6rem; margin-top: 0.5rem;">
+                                    <button type="button" class="btn-success" style="flex: 1;" onclick="updateProduct()">Зберегти</button>
+                                    <button type="button" class="btn-secondary" style="flex: 1;" onclick="closeEditProductModal()">Скасувати</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Inventory Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Артикул</th>
+                                <th>Назва</th>
+                                <th>Категорія</th>
+                                <th>Ціна (₴)</th>
+                                <th>Кількість</th>
+                                <th>Статус</th>
+                                <th>Дії</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryTable">
+                            <tr><td colspan="7" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                        </tbody>
+                                <td>
+                                    <button class="btn-sm btn-primary" onclick="editProduct(2)">Редаг.</button>
+                                    <button class="btn-sm btn-danger" onclick="deleteProduct(2)">Видал.</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MEMBERSHIPS PAGE -->
+            <div id="membershipsPage" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🎫 Управління абонементами</h2>
+                        <button class="btn-primary" onclick="document.getElementById('addMembershipForm').style.display = document.getElementById('addMembershipForm').style.display === 'none' ? 'block' : 'none'">+ Новий абонемент</button>
+                    </div>
+
+                    <!-- Add Membership Form -->
+                    <form id="addMembershipForm" style="display: none; background: #f9f9f9; padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;" onsubmit="event.preventDefault(); addMembership();">
+                        <h3>Додати новий абонемент</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="membershipClientId">Клієнт *</label>
+                                <select id="membershipClientId" required>
+                                    <option value="">Виберіть клієнта</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="membershipType">Тип абонемента *</label>
+                                <select id="membershipType" required>
+                                    <option value="">Виберіть тип</option>
+                                    <option value="UNLIMITED">Безлімітний</option>
+                                    <option value="MONTHLY">Місячний</option>
+                                    <option value="SINGLE">Одноразовий</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="membershipStartDate">Дата початку *</label>
+                                <input type="date" id="membershipStartDate" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="membershipEndDate">Дата закінчення *</label>
+                                <input type="date" id="membershipEndDate" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="membershipPrice">Ціна (₴)</label>
+                                <input type="number" id="membershipPrice" placeholder="0" step="0.01" min="0">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-success">Додати абонемент</button>
+                    </form>
+
+                    <!-- Memberships Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Клієнт</th>
+                                <th>Тип абонемента</th>
+                                <th>Статус</th>
+                                <th>Закінчується</th>
+                                <th>Ціна</th>
+                                <th>Дії</th>
+                            </tr>
+                        </thead>
+                        <tbody id="membershipsTable">
+                            <tr><td colspan="6" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VISITS PAGE -->
+            <!-- ANALYTICS PAGE -->
+            <div id="analyticsPage" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📊 Аналітика та звіти</h2>
+                    </div>
+
+                    <!-- Stats Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h3>Всього клієнтів</h3>
+                            <div class="value" id="totalClients">0</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #27ae60 0%, #16a085 100%);">
+                            <h3>Активних членів</h3>
+                            <div class="value" id="activeMembers">0</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                            <h3>Загальний дохід</h3>
+                            <div class="value" id="totalRevenue">₴0</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);">
+                            <h3>Дохід цього місяця</h3>
+                            <div class="value" id="monthlyRevenue">₴0</div>
+                        </div>
+                    </div>
+
+                    <!-- Insights -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
+                        <div class="card">
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">⭐ Топ-тренери</h3>
+                            <ul id="topTrainers" style="list-style: none;">
+                                <li style="padding: 0.5rem; color: #7f8c8d;">Завантаження...</li>
+                            </ul>
+                        </div>
+                        <div class="card">
+                            <h3 style="color: var(--primary-color); margin-bottom: 1rem;">🎯 Популярні послуги</h3>
+                            <ul id="popularServices" style="list-style: none;">
+                                <li style="padding: 0.5rem; color: #7f8c8d;">Завантаження...</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN: DATABASE QUERIES PAGE -->
+            <div id="dbqueriesPage" class="page" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 style="text-align: center;">🔍 Запити до баз даних</h2>
+                    </div>
+
+                    <!-- Query Tabs -->
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; border-bottom: 2px solid #ecf0f1; padding-bottom: 1rem;">
+                        <button class="query-tab active" onclick="switchQueryTab('productImage')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: var(--primary-color); font-weight: bold; border-bottom: 3px solid var(--primary-color);">📸 Рисунки товарів</button>
+                        <button class="query-tab" onclick="switchQueryTab('assortment')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">📋 Асортимент</button>
+                        <button class="query-tab" onclick="switchQueryTab('priceQty')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">💰 Ціна & Кількість</button>
+                        <button class="query-tab" onclick="switchQueryTab('minMax')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">📊 Мін/Макс</button>
+                        <button class="query-tab" onclick="switchQueryTab('suppliers')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">🏭 Постачальники</button>
+                        <button class="query-tab" onclick="switchQueryTab('inventory')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">📦 Запаси</button>
+                        <button class="query-tab" onclick="switchQueryTab('orders')" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: #7f8c8d; font-weight: bold;">📮 Замовлення</button>
+                    </div>
+
+                    <!-- Query 1: Product Images -->
+                    <div id="queryProductImage" style="display: block;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📸 Рисунки продукції</h3>
+                        <form id="productImageUploadForm" onsubmit="return uploadProductImage(event);" style="display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: end; background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                                <label for="productImageArticle" style="font-weight: 600; color: #2c3e50;">Артикул товару</label>
+                                <input type="text" id="productImageArticle" placeholder="SKU-001" required style="padding: 0.6rem; border: 1px solid #ddd; border-radius: 6px;">
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                                <label for="productImageFile" style="font-weight: 600; color: #2c3e50;">Файл зображення</label>
+                                <input type="file" id="productImageFile" accept="image/*" required style="padding: 0.4rem; border: 1px solid #ddd; border-radius: 6px;">
+                                <small style="color: #7f8c8d;">JPEG/PNG, бажано до 1–2 МБ.</small>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                <button type="submit" class="btn-primary">⬆️ Завантажити</button>
+                                <button type="button" class="btn-secondary" onclick="document.getElementById('productImageUploadForm').reset();">✖️ Очистити</button>
+                            </div>
+                        </form>
+                        <div id="productImagesGrid" class="product-images-grid">
+                            <div class="product-image-placeholder">Завантаження зображень...</div>
+                        </div>
+                    </div>
+
+                    <!-- Query 2: Assortment List -->
+                    <div id="queryAssortment" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📋 Асортиментний список (всі товари за категоріями)</h3>
+                        <div style="margin-bottom: 1rem;">
+                            <label for="assortmentCategory">Фільтр за категорією:</label>
+                            <select id="assortmentCategory" style="padding: 0.5rem; margin-left: 0.5rem;">
+                                <option value="">Всі категорії</option>
+                            </select>
+                        </div>
+                        <table id="assortmentTable">
+                            <thead>
+                                <tr>
+                                    <th>Артикул</th>
+                                    <th>Найменування</th>
+                                    <th>Категорія</th>
+                                    <th>Постачальник</th>
+                                    <th>Ціна (₴)</th>
+                                    <th>Наявна кількість</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="6" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Query 3: Price & Availability -->
+                    <div id="queryPriceQty" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">💰 Наявність і вартість</h3>
+                        <table id="priceQtyTable">
+                            <thead>
+                                <tr>
+                                    <th>Найменування</th>
+                                    <th>Артикул</th>
+                                    <th>Вартість (₴)</th>
+                                    <th>Наявна кількість</th>
+                                    <th>Статус</th>
+                                    <th>Загальна вартість (₴)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="6" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Query 4: Min/Max Products -->
+                    <div id="queryMinMax" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📊 Мінімальна та максимальна кількість</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                            <div class="card" id="minProductCard" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white;">
+                                <h3 style="color: white; margin-bottom: 1rem;">🔴 Мінімальна кількість</h3>
+                                <div style="font-size: 2rem; font-weight: bold; margin-bottom: 1rem;" id="minProductName">—</div>
+                                <p style="margin: 0.5rem 0;">📦 Артикул: <span id="minProductArticle">—</span></p>
+                                <p style="margin: 0.5rem 0;">🔢 Кількість: <strong id="minProductQty">—</strong> шт</p>
+                                <p style="margin: 0.5rem 0;">💰 Ціна: <strong id="minProductPrice">—</strong></p>
+                            </div>
+                            <div class="card" id="maxProductCard" style="background: linear-gradient(135deg, #27ae60 0%, #16a085 100%); color: white;">
+                                <h3 style="color: white; margin-bottom: 1rem;">🟢 Максимальна кількість</h3>
+                                <div style="font-size: 2rem; font-weight: bold; margin-bottom: 1rem;" id="maxProductName">—</div>
+                                <p style="margin: 0.5rem 0;">📦 Артикул: <span id="maxProductArticle">—</span></p>
+                                <p style="margin: 0.5rem 0;">🔢 Кількість: <strong id="maxProductQty">—</strong> шт</p>
+                                <p style="margin: 0.5rem 0;">💰 Ціна: <strong id="maxProductPrice">—</strong></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Query 5: Suppliers -->
+                    <div id="querySupplers" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">🏭 Міста і фабрики-постачальники</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Назва постачальника</th>
+                                    <th>Місто</th>
+                                    <th>Країна</th>
+                                    <th>Контакт</th>
+                                    <th>Товари</th>
+                                </tr>
+                            </thead>
+                            <tbody id="suppliersTable">
+                                <tr><td colspan="5" style="text-align: center; padding: 2rem;">Завантаження постачальників...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Query 6: Inventory History -->
+                    <div id="queryInventory" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📦 Статус запасів (товари з низькими запасами)</h3>
+                        <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <div>
+                                <label for="inventoryStatus">Фільтр за статусом:</label>
+                                <select id="inventoryStatus" style="padding: 0.5rem; margin-left: 0.5rem;">
+                                    <option value="">Всі статуси</option>
+                                    <option value="critical">🔴 Критично мало</option>
+                                    <option value="low">🟡 Мало</option>
+                                    <option value="normal">🟢 Нормально</option>
+                                </select>
+                            </div>
+                            <button onclick="loadInventoryStatus()" class="btn-primary" style="padding: 0.5rem 1rem; height: fit-content;">Оновити</button>
+                        </div>
+                        <table id="inventoryStatusTable">
+                            <thead>
+                                <tr>
+                                    <th>Артикул</th>
+                                    <th>Найменування</th>
+                                    <th>Поточна кількість</th>
+                                    <th>Мінімум</th>
+                                    <th>Статус</th>
+                                    <th>Дія</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="6" style="text-align: center; padding: 2rem;">Завантаження...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Query 7: Order Generation -->
+                    <div id="queryOrders" style="display: none;">
+                        <h3 style="color: var(--primary-color); margin-bottom: 1rem;">📮 Формування ділових листів замовлення</h3>
+                        <div style="background: #f9f9f9; border-left: 4px solid var(--primary-color); padding: 1.5rem; border-radius: 5px; margin-bottom: 1.5rem;">
+                            <h4 style="margin-top: 0;">⚙️ Параметри замовлення</h4>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                                <div>
+                                    <label for="orderProductName">Вибрати товар:</label>
+                                    <select id="orderProductName" style="padding: 0.5rem; width: 100%; border: 1px solid #ddd; border-radius: 5px; margin-top: 0.5rem;">
+                                        <option value="">-- Завантаження товарів --</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="orderQuantity">Замовити кількість:</label>
+                                    <input type="number" id="orderQuantity" placeholder="50" min="1" style="padding: 0.5rem; width: 100%; border: 1px solid #ddd; border-radius: 5px; margin-top: 0.5rem;">
+                                </div>
+                            </div>
+                            <button class="btn-primary" style="margin-top: 1rem; padding: 0.7rem 1.5rem;" onclick="generateOrder()">📮 Сформувати замовлення</button>
+                        </div>
+
+                        <!-- Generated Orders -->
+                        <div id="generatedOrdersContainer" style="display: none;">
+                            <h4 style="margin-bottom: 1rem;">📄 Сформовані замовлення:</h4>
+                            <div id="ordersContent" style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 1.5rem;">
+                                <!-- Orders will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/api.js?v=20241207"></script>
+    <script src="js/auth.js?v=20241207"></script>
+    <script src="js/app.js?v=20241207"></script>
+</body>
+</html>

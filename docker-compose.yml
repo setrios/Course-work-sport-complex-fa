@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # MySQL - Реляційна база даних
+  mysql:
+    image: mysql:8.0
+    container_name: shop-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: sport-complex-cw
+      MYSQL_USER: sport-complex-cw
+      MYSQL_PASSWORD: sport-complex-cw
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis - In-memory кеш
+  redis:
+    image: redis:7-alpine
+    container_name: shop-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # CouchDB - Документна NoSQL база
+  couchdb:
+    image: couchdb:3
+    container_name: shop-couchdb
+    restart: always
+    environment:
+      COUCHDB_USER: couchdb
+      COUCHDB_PASSWORD: couchdb
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Neo4j - Графова база даних
+  neo4j:
+    image: neo4j:5-community
+    container_name: shop-neo4j
+    restart: always
+    environment:
+      NEO4J_AUTH: neo4j/neo4jneo4j
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "neo4jneo4j", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+  couchdb-data:
+    driver: local
+  neo4j-data:
+    driver: local

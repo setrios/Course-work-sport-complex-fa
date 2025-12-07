@@ -1,0 +1,29 @@
+[
+  {
+    "client_id": 1,
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "status": "active",
+    "membership_id": 1,
+    "subscription_type": "MONTHLY",
+    "price": 500
+  },
+  {
+    "client_id": 2,
+    "start_date": "2025-12-01",
+    "end_date": "2025-12-06",
+    "status": "active",
+    "membership_id": 2,
+    "subscription_type": "UNLIMITED",
+    "price": 1000
+  },
+  {
+    "client_id": 6,
+    "start_date": "2025-12-01",
+    "end_date": "2025-12-15",
+    "status": "active",
+    "membership_id": 3,
+    "subscription_type": "MONTHLY",
+    "price": 1500
+  }
+]

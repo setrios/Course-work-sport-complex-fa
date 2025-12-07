@@ -1,0 +1,37 @@
+[
+  {
+    "service_name": "Персональна тренування (1 година)",
+    "price": 300.0,
+    "requires_medical_certificate": false,
+    "is_active": true,
+    "service_id": 1
+  },
+  {
+    "service_name": "Групова тренування з фітнесу",
+    "price": 100.0,
+    "requires_medical_certificate": false,
+    "is_active": true,
+    "service_id": 2
+  },
+  {
+    "service_name": "Йога клас",
+    "price": 80.0,
+    "requires_medical_certificate": false,
+    "is_active": true,
+    "service_id": 3
+  },
+  {
+    "service_name": "Цільова тренування (спеціалізована)",
+    "price": 250.0,
+    "requires_medical_certificate": true,
+    "is_active": true,
+    "service_id": 4
+  },
+  {
+    "service_name": "Реабілітаційна тренування",
+    "price": 200.0,
+    "requires_medical_certificate": true,
+    "is_active": true,
+    "service_id": 5
+  }
+]

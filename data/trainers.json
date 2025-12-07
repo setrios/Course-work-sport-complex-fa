@@ -1,0 +1,62 @@
+[
+  {
+    "full_name": "Дмитро Силенко",
+    "specialization": "Фітнес і силові тренування",
+    "birth_date": "1985-03-10",
+    "contact_info": {
+      "phone": "+380951234567",
+      "email": "dmitro@example.com"
+    },
+    "trainer_id": 1
+  },
+  {
+    "full_name": "Світлана Романова",
+    "specialization": "Йога та флексібільність",
+    "birth_date": "1992-07-25",
+    "contact_info": {
+      "phone": "+380961234567",
+      "email": "svitlana@example.com"
+    },
+    "trainer_id": 2
+  },
+  {
+    "full_name": "Андрій Попов",
+    "specialization": "Кардіо та марафонський біг",
+    "birth_date": "1988-01-15",
+    "contact_info": {
+      "phone": "+380971234567",
+      "email": "andrey@example.com"
+    },
+    "trainer_id": 3
+  },
+  {
+    "full_name": "Андрій Попов",
+    "specialization": "Кардіо та марафонський біг",
+    "birth_date": "1988-01-15",
+    "contact_info": {
+      "phone": "+380971234567",
+      "email": "andrey.popov@example.com"
+    },
+    "trainer_id": 4
+  },
+  {
+    "full_name": "Олег Болобан",
+    "specialization": "Плавання",
+    "birth_date": "1982-03-20",
+    "contact_info": {
+      "phone": "+380951357924",
+      "email": "oleg.boloban@example.com"
+    },
+    "trainer_id": 6
+  },
+  {
+    "full_name": "Дмитро Силенко",
+    "specialization": "Фітнес і силові тренування",
+    "birth_date": "1985-03-10",
+    "contact_info": {
+      "phone": "+380951234567",
+      "email": "dmitro@example.com"
+    },
+    "trainer_id": 7
+  }
+]

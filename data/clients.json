@@ -1,0 +1,108 @@
+[
+  {
+    "full_name": "Іван Петренко",
+    "birth_date": "1990-05-15",
+    "gender": "MALE",
+    "contact_info": {
+      "phone": "+380501234567",
+      "email": "ivan@example.com",
+      "address": null
+    },
+    "username": "ivan_petrenko",
+    "has_valid_cert": false,
+    "client_id": 1
+  },
+  {
+    "full_name": "Марія Іванівна",
+    "birth_date": "1995-03-22",
+    "gender": "FEMALE",
+    "contact_info": {
+      "phone": "+380661234567",
+      "email": "maria@example.com",
+      "address": null
+    },
+    "username": "maria_ivanova",
+    "has_valid_cert": false,
+    "client_id": 2
+  },
+  {
+    "full_name": "Олег Коваленко",
+    "birth_date": "1988-07-10",
+    "gender": "MALE",
+    "contact_info": {
+      "phone": "+380731234567",
+      "email": "oleg@example.com",
+      "address": null
+    },
+    "username": "oleg_kovalenko",
+    "has_valid_cert": false,
+    "client_id": 3
+  },
+  {
+    "full_name": "Ірина Коваль",
+    "birth_date": "1991-04-12",
+    "gender": "FEMALE",
+    "contact_info": {
+      "phone": "+380671234567",
+      "email": "iryna.koval@example.com",
+      "address": "м. Київ, вул. Спортивна, 5"
+    },
+    "username": "iryna.koval",
+    "has_valid_cert": false,
+    "client_id": 1
+  },
+  {
+    "full_name": "Петро Мельник",
+    "birth_date": "1988-09-03",
+    "gender": "MALE",
+    "contact_info": {
+      "phone": "+380501112233",
+      "email": "petro.melnyk@example.com",
+      "address": "м. Львів, просп. Свободи, 21"
+    },
+    "username": "petro.melnyk",
+    "has_valid_cert": false,
+    "client_id": 2
+  },
+  {
+    "full_name": "Марія Левченко",
+    "birth_date": "1995-12-20",
+    "gender": "FEMALE",
+    "contact_info": {
+      "phone": "+380931234890",
+      "email": "mariya.levchenko@example.com",
+      "address": "м. Харків, вул. Наукова, 10"
+    },
+    "username": "mariya.levchenko",
+    "has_valid_cert": false,
+    "client_id": 3
+  },
+  {
+    "full_name": "Іван петренко",
+    "birth_date": "2025-12-01",
+    "gender": "MALE",
+    "contact_info": {
+      "phone": "456456",
+      "email": "ivan@exmpl.com",
+      "address": null
+    },
+    "username": "IPP",
+    "has_valid_cert": false,
+    "client_id": 5,
+    "password": "111111"
+  },
+  {
+    "full_name": "Богдан Бородка",
+    "birth_date": "2006-02-14",
+    "gender": "MALE",
+    "contact_info": {
+      "phone": "0959072778",
+      "email": "obo@lll.kpi.ua",
+      "address": null
+    },
+    "username": "BBorodka",
+    "has_valid_cert": false,
+    "client_id": 6,
+    "password": "666666"
+  }
+]

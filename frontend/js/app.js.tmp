@@ -1,0 +1,1365 @@
+// ==========================================
+// Global State
+// ==========================================
+
+let currentUserRole = 'user';  // 'user' or 'admin'
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPhone(phone) {
+    return /^[\d\s+\-()]{10,}$/.test(phone);
+}
+
+function getFormValue(elementId) {
+    const element = document.getElementById(elementId);
+    return element ? element.value.trim() : '';
+}
+
+function setFormValue(elementId, value) {
+    const element = document.getElementById(elementId);
+    if (element) element.value = value || '';
+}
+
+function formatPrice(price) {
+    return price ? `₴${parseFloat(price).toFixed(2)}` : '-';
+}
+
+function formatDate(date) {
+    if (!date) return '-';
+    return new Date(date).toLocaleDateString('uk-UA');
+}
+
+function formatDateTime(datetime) {
+    if (!datetime) return '-';
+    return new Date(datetime).toLocaleString('uk-UA', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+    });
+}
+
+// ==========================================
+// Notification System
+// ==========================================
+
+function showNotification(message, type = 'info') {
+    // Create notification container if not exists
+    let notificationContainer = document.getElementById('notificationContainer');
+    if (!notificationContainer) {
+        notificationContainer = document.createElement('div');
+        notificationContainer.id = 'notificationContainer';
+        notificationContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            max-width: 400px;
+        `;
+        document.body.appendChild(notificationContainer);
+    }
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        padding: 1rem;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        font-weight: 500;
+        animation: slideIn 0.3s ease-in-out;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    `;
+    
+    // Set colors based on type
+    const colors = {
+        'success': { bg: '#d5f4e6', text: '#27ae60', border: '#27ae60' },
+        'danger': { bg: '#fadbd8', text: '#c0392b', border: '#c0392b' },
+        'warning': { bg: '#fdeaa8', text: '#d68910', border: '#d68910' },
+        'info': { bg: '#d6eaf8', text: '#2874a6', border: '#2874a6' }
+    };
+    
+    const color = colors[type] || colors['info'];
+    notification.style.backgroundColor = color.bg;
+    notification.style.color = color.text;
+    notification.style.borderLeft = `4px solid ${color.border}`;
+    notification.textContent = message;
+    
+    notificationContainer.appendChild(notification);
+    
+    // Auto-remove notification after 4 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-in-out';
+        setTimeout(() => {
+            notification.remove();
+        }, 300);
+    }, 4000);
+}
+
+// ==========================================
+// Page Navigation & Management
+// ==========================================
+
+function switchPage(pageName) {
+    // Hide all pages
+    document.querySelectorAll('.page').forEach(page => {
+        page.style.display = 'none';
+    });
+
+    // Deactivate all nav buttons
+    document.querySelectorAll('nav button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // Prevent non-admin users from accessing database queries
+    if (pageName === 'dbqueries' && currentUserRole !== 'admin') {
+        showNotification('❌ Доступ заборонено. Тільки адміністратори можуть переглядати запити БД', 'danger');
+        return;
+    }
+    
+    // Determine if it's user or admin page
+    let pageId = pageName + 'Page';
+    
+    if (pageName === 'home') {
+        // Show role-specific home page
+        if (currentUserRole === 'admin') {
+            pageId = 'homePageAdmin';
+        } else {
+            pageId = 'homePageUser';
+        }
+    } else if (currentUserRole === 'user' && pageName !== 'home') {
+        pageId = pageName + 'PageUser';
+    } else if (currentUserRole === 'admin' && pageName !== 'home') {
+        // Admin pages have different naming
+        if (['clients', 'trainers', 'services', 'memberships', 'visits', 'analytics'].includes(pageName)) {
+            pageId = pageName + 'Page';
+        } else if (pageName === 'statistics') {
+            pageId = 'statisticsPage';
+        } else if (pageName === 'inventory') {
+            pageId = 'inventoryPage';
+        } else if (pageName === 'dbqueries') {
+            pageId = 'dbqueriesPage';
+        }
+    }
+
+    // Show selected page
+    const selectedPage = document.getElementById(pageId);
+    if (selectedPage) {
+        selectedPage.style.display = 'block';
+    }
+
+    // Activate corresponding nav button
+    const navBtn = document.querySelector(`[data-page="${pageName}"]`);
+    if (navBtn) {
+        navBtn.classList.add('active');
+    }
+
+    // Load page-specific data
+    loadPageData(pageName);
+}
+
+function loadPageData(pageName) {
+    switch (pageName) {
+        // USER pages
+        case 'myBookings':
+            loadUserBookings();
+            break;
+        case 'myTrainings':
+            loadUserTrainings();
+            break;
+        case 'profile':
+            loadUserProfile();
+            break;
+        case 'services':
+            if (currentUserRole === 'admin') {
+                loadAdminServices();
+            } else {
+                loadUserServices();
+            }
+            break;
+        // ADMIN pages
+        case 'statistics':
+            loadAdminStatistics();
+            break;
+        case 'inventory':
+            loadInventory();
+            break;
+        case 'clients':
+            if (currentUserRole === 'admin') loadClients();
+            break;
+        case 'trainers':
+            loadTrainers();
+            break;
+        case 'memberships':
+            loadMemberships();
+            break;
+        case 'visits':
+            loadVisits();
+            break;
+        case 'analytics':
+            loadAnalytics();
+            break;
+        case 'dbqueries':
+            loadDBQueries();
+            break;
+    }
+}
+
+// ==========================================
+// Initialize on page load
+// ==========================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Update navigation based on user role
+    updateNavigationForRole();
+    switchPage('home');
+});
+
+function updateNavigationForRole() {
+    const userRole = localStorage.getItem('authRole') || 'user';
+    currentUserRole = userRole;
+
+    const userNav = document.getElementById('userNav');
+    const adminNav = document.getElementById('adminNav');
+
+    if (userRole === 'admin') {
+        userNav.style.display = 'none';
+        adminNav.style.display = 'block';
+    } else {
+        userNav.style.display = 'block';
+        adminNav.style.display = 'none';
+    }
+    
+    // Hide database queries button for non-admin users (security measure)
+    const dbQueriesBtn = document.querySelector('[data-page="dbqueries"]');
+    if (dbQueriesBtn) {
+        if (userRole === 'admin') {
+            dbQueriesBtn.style.display = 'inline-block';
+        } else {
+            dbQueriesBtn.style.display = 'none';
+        }
+    }
+}
+
+// ==========================================
+// USER PAGES
+// ==========================================
+
+function loadUserServices() {
+    // Load available services for booking
+    try {
+        const servicesGrid = document.getElementById('userServicesGrid');
+        if (servicesGrid) {
+            servicesGrid.innerHTML = `
+                <div class="service-card">
+                    <h3>Базовий фітнес</h3>
+                    <p style="color: #7f8c8d; margin: 0.5rem 0;">⏱️ 60 хвилин</p>
+                    <p style="color: #27ae60; font-weight: bold; font-size: 1.2rem; margin: 1rem 0;">₴150</p>
+                    <p style="color: #7f8c8d; font-size: 0.9rem;">Базові тренування з навантаженням для новачків</p>
+                    <button class="btn-success" style="width: 100%; margin-top: 1rem;" onclick="bookService('Базовий фітнес', 150)">📅 Забронювати</button>
+                </div>
+                <div class="service-card">
+                    <h3>Йога для початківців</h3>
+                    <p style="color: #7f8c8d; margin: 0.5rem 0;">⏱️ 45 хвилин</p>
+                    <p style="color: #27ae60; font-weight: bold; font-size: 1.2rem; margin: 1rem 0;">₴120</p>
+                    <p style="color: #7f8c8d; font-size: 0.9rem;">Розслаблення та гнучкість. Ідеально для усіх рівнів</p>
+                    <button class="btn-success" style="width: 100%; margin-top: 1rem;" onclick="bookService('Йога для початківців', 120)">📅 Забронювати</button>
+                </div>
+                <div class="service-card">
+                    <h3>Плавання</h3>
+                    <p style="color: #7f8c8d; margin: 0.5rem 0;">⏱️ 60 хвилин</p>
+                    <p style="color: #27ae60; font-weight: bold; font-size: 1.2rem; margin: 1rem 0;">₴180</p>
+                    <p style="color: #7f8c8d; font-size: 0.9rem;">Заняття в басейні з досвідченим тренером</p>
+                    <button class="btn-success" style="width: 100%; margin-top: 1rem;" onclick="bookService('Плавання', 180)">📅 Забронювати</button>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Помилка завантаження послуг:', error);
+    }
+}
+
+function bookService(serviceName, price) {
+    const bookingDate = prompt(`Забронювати "${serviceName}" (₴${price})?\n\nОберіть дату (YYYY-MM-DD):`);
+    if (bookingDate) {
+        showNotification(`✅ Ви забронювали "${serviceName}" на ${bookingDate}`, 'success');
+        loadUserBookings();
+    }
+}
+
+function loadUserBookings() {
+    try {
+        const bookingsTable = document.getElementById('userBookingsTable');
+        if (bookingsTable) {
+            bookingsTable.innerHTML = `
+                <tr>
+                    <td>Базовий фітнес</td>
+                    <td>2025-12-10</td>
+                    <td>Сергій К.</td>
+                    <td><span class="badge badge-success">✓ Підтверджено</span></td>
+                    <td><button class="btn-sm btn-danger" onclick="cancelBooking()">Скасувати</button></td>
+                </tr>
+                <tr>
+                    <td>Йога для початківців</td>
+                    <td>2025-12-12</td>
+                    <td>Марія П.</td>
+                    <td><span class="badge badge-success">✓ Підтверджено</span></td>
+                    <td><button class="btn-sm btn-danger" onclick="cancelBooking()">Скасувати</button></td>
+                </tr>
+            `;
+        }
+    } catch (error) {
+        console.error('Помилка завантаження бронювань:', error);
+    }
+}
+
+function cancelBooking() {
+    if (confirm('Скасувати бронювання?')) {
+        showNotification('Бронювання скасовано', 'info');
+        loadUserBookings();
+    }
+}
+
+function loadUserTrainings() {
+    try {
+        const monthlyValue = document.getElementById('currentMonthTrainings');
+        if (monthlyValue) {
+            monthlyValue.textContent = Math.floor(Math.random() * 12) + 3;
+        }
+        showNotification('📊 Ваші тренування завантажені', 'info');
+    } catch (error) {
+        console.error('Помилка завантаження тренувань:', error);
+    }
+}
+
+function loadUserProfile() {
+    try {
+        const username = localStorage.getItem('authUsername') || 'користувач';
+        const userProfileUsername = document.getElementById('profileUsername');
+        if (userProfileUsername) {
+            userProfileUsername.textContent = username;
+        }
+        showNotification('👤 Профіль завантажений', 'info');
+    } catch (error) {
+        console.error('Помилка завантаження профіля:', error);
+    }
+}
+
+function updateUserProfile() {
+    const email = document.getElementById('profileEmail').value;
+    const phone = document.getElementById('profilePhone').value;
+    
+    if (!email && !phone) {
+        showNotification('⚠️ Заповніть хоча б одне поле', 'warning');
+        return;
+    }
+    
+    showNotification('✅ Профіль оновлено успішно', 'success');
+}
+
+// ==========================================
+// ADMIN PAGES
+// ==========================================
+
+function loadAdminStatistics() {
+    try {
+        showNotification('📊 Статистика завантажена', 'info');
+    } catch (error) {
+        console.error('Помилка завантаження статистики:', error);
+    }
+}
+
+async function loadInventory() {
+    try {
+        const data = await API.products.list();
+        const inventoryTable = document.getElementById('inventoryTable');
+        inventoryTable.innerHTML = '';
+
+        if (data.length === 0) {
+            inventoryTable.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 2rem;">Немає товарів</td></tr>';
+            return;
+        }
+
+        data.forEach(product => {
+            const status = product.quantity > (product.min_stock || 10) ? 'badge-success' : 'badge-warning';
+            const statusText = product.quantity > (product.min_stock || 10) ? '✓ В наявності' : '⚠ Мало';
+            const row = `
+                <tr>
+                    <td>${product.article || '-'}</td>
+                    <td>${product.name || '-'}</td>
+                    <td>${product.category || '-'}</td>
+                    <td>₴${(product.price_uah || 0).toFixed(0)}</td>
+                    <td>${product.quantity || 0}</td>
+                    <td><span class="badge ${status}">${statusText}</span></td>
+                    <td>
+                        <button class="btn-sm btn-primary" onclick="editProduct('${product.article}')">Редаг.</button>
+                        <button class="btn-sm btn-danger" onclick="deleteProduct('${product.article}')">Видал.</button>
+                    </td>
+                </tr>
+            `;
+            inventoryTable.innerHTML += row;
+        });
+    } catch (error) {
+        console.error('[LoadInventory] Error:', error);
+        showNotification('Помилка завантаження товарів: ' + error.message, 'danger');
+    }
+}
+
+function showInventoryForm() {
+    const form = document.getElementById('inventoryForm');
+    if (form) {
+        if (form.style.display === 'none') {
+            form.style.display = 'block';
+            loadCategoriesAndSuppliers();
+        } else {
+            form.style.display = 'none';
+        }
+    }
+}
+
+async function loadCategoriesAndSuppliers() {
+    try {
+        const [categories, suppliers] = await Promise.all([
+            API.categories.list(),
+            API.suppliers.list()
+        ]);
+
+        // Populate add form
+        const categorySelect = document.getElementById('productCategory');
+        const supplierSelect = document.getElementById('productSupplier');
+        
+        categorySelect.innerHTML = '<option value="">Оберіть категорію</option>' +
+            categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+        
+        supplierSelect.innerHTML = '<option value="">Оберіть постачальника</option>' +
+            suppliers.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+
+        // Populate edit form
+        const editCategorySelect = document.getElementById('editProductCategory');
+        const editSupplierSelect = document.getElementById('editProductSupplier');
+        
+        editCategorySelect.innerHTML = '<option value="">Оберіть категорію</option>' +
+            categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+        
+        editSupplierSelect.innerHTML = '<option value="">Оберіть постачальника</option>' +
+            suppliers.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+
+    } catch (error) {
+        console.error('[LoadCategoriesAndSuppliers] Error:', error);
+        showNotification('Помилка завантаження категорій/постачальників', 'danger');
+    }
+}
+
+async function addProduct() {
+    const article = document.getElementById('productArticle').value.trim();
+    const name = document.getElementById('productName').value.trim();
+    const category = document.getElementById('productCategory').value;
+    const price = parseFloat(document.getElementById('productPrice').value);
+    const quantity = parseInt(document.getElementById('productQuantity').value);
+    const supplier = document.getElementById('productSupplier').value;
+
+    if (!article || !name || !category || !supplier || isNaN(price) || isNaN(quantity)) {
+        showNotification('⚠️ Заповніть обов\'язкові поля', 'warning');
+        return;
+    }
+
+    if (price <= 0 || quantity < 0) {
+        showNotification('⚠️ Ціна повинна бути додатною', 'warning');
+        return;
+    }
+
+    try {
+        const payload = {
+            article: article,
+            name: name,
+            category_name: category,
+            supplier_name: supplier,
+            price: price,
+            quantity: quantity,
+            min_stock: 10,
+            delivery_days: 7
+        };
+
+        await API.products.create(payload);
+        showNotification('✅ Товар доданий успішно', 'success');
+        document.getElementById('inventoryForm').style.display = 'none';
+        document.querySelectorAll('#inventoryForm input, #inventoryForm select').forEach(el => el.value = '');
+        loadInventory();
+    } catch (error) {
+        console.error('[AddProduct] Error:', error);
+        showNotification('Помилка додавання: ' + error.message, 'danger');
+    }
+}
+
+let currentEditProductArticle = null;
+
+async function editProduct(article) {
+    try {
+        const product = await API.products.byArticle(article);
+        
+        // Load categories and suppliers first
+        await loadCategoriesAndSuppliers();
+        
+        document.getElementById('editProductArticle').value = product.article;
+        document.getElementById('editProductName').value = product.name;
+        document.getElementById('editProductCategory').value = product.category || '';
+        document.getElementById('editProductPrice').value = product.price_uah || 0;
+        document.getElementById('editProductQuantity').value = product.quantity || 0;
+        document.getElementById('editProductSupplier').value = product.supplier || '';
+        
+        currentEditProductArticle = article;
+        document.getElementById('editProductModal').style.display = 'flex';
+    } catch (error) {
+        console.error('[EditProduct] Error:', error);
+        showNotification('Помилка завантаження товару: ' + error.message, 'danger');
+    }
+}
+
+function closeEditProductModal() {
+    document.getElementById('editProductModal').style.display = 'none';
+    currentEditProductArticle = null;
+}
+
+async function updateProduct() {
+    if (!currentEditProductArticle) {
+        showNotification('Помилка: товар не вибран', 'danger');
+        return;
+    }
+
+    const name = document.getElementById('editProductName').value.trim();
+    const category = document.getElementById('editProductCategory').value;
+    const price = parseFloat(document.getElementById('editProductPrice').value);
+    const quantity = parseInt(document.getElementById('editProductQuantity').value);
+    const supplier = document.getElementById('editProductSupplier').value;
+
+    if (!name || !category || !supplier || isNaN(price) || isNaN(quantity)) {
+        showNotification('⚠️ Заповніть обов\'язкові поля', 'warning');
+        return;
+    }
+
+    if (price <= 0 || quantity < 0) {
+        showNotification('⚠️ Ціна повинна бути додатною', 'warning');
+        return;
+    }
+
+    try {
+        const payload = {
+            article: document.getElementById('editProductArticle').value,
+            name: name,
+            category_name: category,
+            supplier_name: supplier,
+            price: price,
+            quantity: quantity,
+            min_stock: 10,
+            delivery_days: 7
+        };
+
+        await API.products.update(currentEditProductArticle, payload);
+        showNotification('✓ Товар оновлено', 'success');
+        closeEditProductModal();
+        loadInventory();
+    } catch (error) {
+        console.error('[UpdateProduct] Error:', error);
+        showNotification('Помилка оновлення: ' + error.message, 'danger');
+    }
+}
+
+async function deleteProduct(article) {
+    if (!confirm('Видалити цей товар?')) return;
+    try {
+        await API.products.delete(article);
+        showNotification('✓ Товар видалено успішно', 'success');
+        loadInventory();
+    } catch (error) {
+        console.error('[DeleteProduct] Error:', error);
+        showNotification('Помилка видалення: ' + error.message, 'danger');
+    }
+}
+
+function loadAdminServices() {
+    try {
+        loadServices();
+    } catch (error) {
+        console.error('Помилка завантаження послуг:', error);
+    }
+}
+
+// ==========================================
+// SHARED PAGES (User & Admin)
+// ==========================================
+
+async function loadClients() {
+    try {
+        const data = await API.clients.list();
+        const clientsTable = document.getElementById('clientsTable');
+        clientsTable.innerHTML = '';
+
+        if (data.length === 0) {
+            clientsTable.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 2rem;">Немає клієнтів</td></tr>';
+            return;
+        }
+
+        data.forEach(client => {
+            const contact = client.contact_info || {};
+            const row = `
+                <tr>
+                    <td>${client.full_name}</td>
+                    <td>${formatDate(client.birth_date)}</td>
+                    <td>${contact.phone || '-'}</td>
+                    <td>${contact.email || '-'}</td>
+                    <td>
+                        <button class="btn-sm btn-primary" onclick="editClient('${client.client_id || ''}')">Редагувати</button>
+                        <button class="btn-sm btn-danger" onclick="if(confirm('Видалити клієнта?')) deleteClientDirect('${client.client_id || ''}')">Видалити</button>
+                    </td>
+                </tr>
+            `;
+            clientsTable.innerHTML += row;
+        });
+    } catch (error) {
+        showNotification('Помилка завантаження клієнтів: ' + error.message, 'danger');
+    }
+}
+
+async function createClient() {
+    const fullName = document.getElementById('clientName').value;
+    const birthDate = document.getElementById('clientBirthDate').value;
+    const phone = document.getElementById('clientPhone').value;
+    const email = document.getElementById('clientEmail').value;
+    const username = document.getElementById('clientUsername').value;
+    const password = document.getElementById('clientPassword').value;
+
+    console.log('[CreateClient] Form values:', { fullName, birthDate, phone, email, username });
+
+    if (!fullName || !birthDate || !username || !password) {
+        showNotification('Заповніть обов\'язкові поля (ПІБ, дата, ім\'я користувача, пароль)', 'warning');
+        return;
+    }
+
+    if (username.length < 3) {
+        showNotification('Ім\'я користувача повинно мати мінімум 3 символи', 'warning');
+        return;
+    }
+
+    if (password.length < 6) {
+        showNotification('Пароль повинен мати мінімум 6 символів', 'warning');
+        return;
+    }
+
+    try {
+        // Build contact_info object - only include non-empty values
+        const contact_info = {};
+        if (phone && phone.trim()) contact_info.phone = phone.trim();
+        if (email && email.trim()) contact_info.email = email.trim();
+        
+        const payload = {
+            full_name: fullName,
+            birth_date: birthDate,
+            gender: 'MALE',
+            contact_info: Object.keys(contact_info).length > 0 ? contact_info : null,
+            username: username,
+            password: password
+        };
+
+        console.log('[CreateClient] Sending payload:', payload);
+        
+        await API.clients.create(payload);
+        showNotification('Клієнт та облік користувача створені успішно', 'success');
+        document.getElementById('clientForm').reset();
+        document.getElementById('clientForm').style.display = 'none';
+        loadClients();
+    } catch (error) {
+        console.error('[CreateClient] Error:', error);
+        showNotification('Помилка: ' + error.message, 'danger');
+    }
+}
+
+// Current client being edited
+let currentEditClientId = null;
+
+async function editClient(clientId) {
+    try {
+        console.log('[EditClient] Loading client:', clientId);
+        const client = await API.clients.get(clientId);
+        
+        // Populate form
+        document.getElementById('editClientName').value = client.full_name;
+        document.getElementById('editClientBirthDate').value = client.birth_date;
+        document.getElementById('editClientPhone').value = client.contact_info?.phone || '';
+        document.getElementById('editClientEmail').value = client.contact_info?.email || '';
+        document.getElementById('editClientAddress').value = client.contact_info?.address || '';
+        document.getElementById('editClientGender').value = client.gender || 'MALE';
+        
+        currentEditClientId = clientId;
+        
+        // Show modal
+        const modal = document.getElementById('editClientModal');
+        modal.style.display = 'flex';
+    } catch (error) {
+        console.error('[EditClient] Error:', error);
+        showNotification('Помилка завантаження клієнта: ' + error.message, 'danger');
+    }
+}
+
+function closeEditModal() {
+    document.getElementById('editClientModal').style.display = 'none';
+    document.getElementById('editClientForm').reset();
+    currentEditClientId = null;
+}
+
+async function updateClient() {
+    if (!currentEditClientId) {
+        showNotification('Помилка: клієнт не вибран', 'danger');
+        return;
+    }
+
+    const fullName = document.getElementById('editClientName').value;
+    const birthDate = document.getElementById('editClientBirthDate').value;
+    const phone = document.getElementById('editClientPhone').value;
+    const email = document.getElementById('editClientEmail').value;
+    const address = document.getElementById('editClientAddress').value;
+    const gender = document.getElementById('editClientGender').value;
+
+    if (!fullName || !birthDate) {
+        showNotification('Заповніть обов\'язкові поля (ПІБ, дата)', 'warning');
+        return;
+    }
+
+    try {
+        const contact_info = {};
+        if (phone) contact_info.phone = phone;
+        if (email) contact_info.email = email;
+        if (address) contact_info.address = address;
+
+        const payload = {
+            full_name: fullName,
+            birth_date: birthDate,
+            gender: gender,
+            contact_info: Object.keys(contact_info).length > 0 ? contact_info : null,
+            username: '',
+            password: ''
+        };
+
+        console.log('[UpdateClient] Sending payload:', payload);
+        await API.clients.update(currentEditClientId, payload);
+        
+        showNotification('Клієнт успішно оновлений', 'success');
+        closeEditModal();
+        loadClients();
+    } catch (error) {
+        console.error('[UpdateClient] Error:', error);
+        showNotification('Помилка оновлення: ' + error.message, 'danger');
+    }
+}
+
+async function confirmDeleteClient() {
+    if (!currentEditClientId) {
+        showNotification('Помилка: клієнт не вибран', 'danger');
+        return;
+    }
+
+    const clientName = document.getElementById('editClientName').value;
+    
+    if (confirm(`Ви впевнені, що бажаєте видалити клієнта "${clientName}"?\n\nЦю дію неможливо скасувати!`)) {
+        await deleteClient();
+    }
+}
+
+async function deleteClient() {
+    if (!currentEditClientId) {
+        showNotification('Помилка: клієнт не вибран', 'danger');
+        return;
+    }
+
+    try {
+        console.log('[DeleteClient] Deleting client:', currentEditClientId);
+        await API.clients.delete(currentEditClientId);
+        
+        showNotification('Клієнт успішно видалений', 'success');
+        closeEditModal();
+        loadClients();
+    } catch (error) {
+        console.error('[DeleteClient] Error:', error);
+        showNotification('Помилка видалення: ' + error.message, 'danger');
+    }
+}
+
+async function deleteClientDirect(clientId) {
+    try {
+        console.log('[DeleteClient] Deleting client:', clientId);
+        await API.clients.delete(clientId);
+        
+        showNotification('Клієнт успішно видалений', 'success');
+        loadClients();
+    } catch (error) {
+        console.error('[DeleteClient] Error:', error);
+        showNotification('Помилка видалення: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// SPORT TRAINERS
+// ==========================================
+
+async function loadTrainers() {
+    try {
+        const data = await API.trainers.list();
+        const trainersTable = document.getElementById('trainersTable');
+
+        if (!data || data.length === 0) {
+            trainersTable.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 2rem;">Немає тренерів</td></tr>';
+            return;
+        }
+
+        const rows = data.map(trainer => `
+            <tr>
+                <td>${trainer.full_name || '-'}</td>
+                <td>${trainer.specialization || '-'}</td>
+                <td>${trainer.contact_info?.phone || '-'}</td>
+                <td>${trainer.contact_info?.email || '-'}</td>
+                <td>
+                    <button class="btn-sm btn-primary" onclick="editTrainer(${trainer.trainer_id})">Редагувати</button>
+                    <button class="btn-sm btn-danger" onclick="deleteTrainer(${trainer.trainer_id})">Видалити</button>
+                </td>
+            </tr>
+        `).join('');
+        trainersTable.innerHTML = rows;
+    } catch (error) {
+        showNotification('Помилка завантаження тренерів: ' + error.message, 'danger');
+    }
+}
+
+async function createTrainer() {
+    const fullName = document.getElementById('trainerName').value.trim();
+    const specialization = document.getElementById('trainerSpec').value.trim();
+    const phone = document.getElementById('trainerPhone').value.trim();
+    const email = document.getElementById('trainerEmail').value.trim();
+
+    if (!fullName || !specialization) {
+        showNotification('Заповніть обов\'язкові поля (ПІБ, спеціалізація)', 'warning');
+        return;
+    }
+
+    if (email && !isValidEmail(email)) {
+        showNotification('Невірний формат email', 'warning');
+        return;
+    }
+
+    try {
+        console.log('[CreateTrainer] Creating trainer:', { fullName, specialization });
+        const payload = {
+            full_name: fullName,
+            specialization: specialization,
+            birth_date: '1990-01-01',
+            gender: 'MALE',
+            contact_info: {}
+        };
+        
+        if (phone) payload.contact_info.phone = phone;
+        if (email) payload.contact_info.email = email;
+        
+        await API.trainers.create(payload);
+        showNotification('Тренер доданий успішно', 'success');
+        document.getElementById('trainerForm').reset();
+        loadTrainers();
+    } catch (error) {
+        console.error('[CreateTrainer] Error:', error);
+        showNotification('Помилка: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// SPORT SERVICES
+// ==========================================
+
+async function loadServices() {
+    try {
+        const data = await API.services.list();
+        const servicesTable = document.getElementById('servicesTable');
+        servicesTable.innerHTML = '';
+
+        if (data.length === 0) {
+            servicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 2rem;">Немає послуг</td></tr>';
+            return;
+        }
+
+        data.forEach(service => {
+            const row = `
+                <tr>
+                    <td>${service.service_name}</td>
+                    <td>${formatPrice(service.price)}</td>
+                    <td>
+                        <span class="badge ${service.requires_medical_certificate ? 'badge-warning' : 'badge-success'}">
+                            ${service.requires_medical_certificate ? 'Потрібна мед. довідка' : 'Доступна'}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn-sm btn-primary" onclick="editService(${service.service_id})">Редагувати</button>
+                        <button class="btn-sm btn-danger" onclick="deleteService(${service.service_id})">Видалити</button>
+                    </td>
+                </tr>
+            `;
+            servicesTable.innerHTML += row;
+        });
+    } catch (error) {
+        showNotification('Помилка завантаження послуг: ' + error.message, 'danger');
+    }
+}
+
+async function createService() {
+    const name = document.getElementById('serviceName').value.trim();
+    const price = document.getElementById('servicePrice').value.trim();
+
+    if (!name || !price) {
+        showNotification('Заповніть обов\'язкові поля (назва, ціна)', 'warning');
+        return;
+    }
+
+    if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+        showNotification('Ціна повинна бути позитивним числом', 'warning');
+        return;
+    }
+
+    try {
+        console.log('[CreateService] Creating service:', { name, price });
+        await API.services.create({
+            service_name: name,
+            price: parseFloat(price),
+            requires_medical_certificate: false
+        });
+        showNotification('Послуга додана успішно', 'success');
+        document.getElementById('serviceForm').reset();
+        loadAdminServices();
+    } catch (error) {
+        console.error('[CreateService] Error:', error);
+        showNotification('Помилка: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// MEMBERSHIPS
+// ==========================================
+
+async function loadMemberships() {
+    try {
+        const data = await API.memberships.list();
+        const membershipsTable = document.getElementById('membershipsTable');
+        membershipsTable.innerHTML = '';
+
+        if (data.length === 0) {
+            membershipsTable.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem;">Немає абонементів</td></tr>';
+            return;
+        }
+
+        data.forEach((membership, idx) => {
+            const status = membership.status || 'active';
+            const statusColor = status === 'active' ? 'badge-success' : status === 'frozen' ? 'badge-warning' : 'badge-danger';
+            const row = `
+                <tr>
+                    <td>${membership.client_id || '-'}</td>
+                    <td>${membership.service_id || '-'}</td>
+                    <td><span class="badge ${statusColor}">${status}</span></td>
+                    <td>${formatDate(membership.end_date)}</td>
+                    <td>-</td>
+                    <td>#${membership.membership_id || idx}</td>
+                </tr>
+            `;
+            membershipsTable.innerHTML += row;
+        });
+    } catch (error) {
+        showNotification('Помилка завантаження абонементів: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// VISITS
+// ==========================================
+
+async function loadVisits() {
+    try {
+        const data = await API.visits.list();
+        const visitsTable = document.getElementById('visitsTable');
+        visitsTable.innerHTML = '';
+
+        if (data.length === 0) {
+            visitsTable.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 2rem;">Немає відвідувань</td></tr>';
+            return;
+        }
+
+        data.forEach(visit => {
+            const row = `
+                <tr>
+                    <td>${visit.client_id || '-'}</td>
+                    <td>${visit.service || visit.service_id || '-'}</td>
+                    <td>${formatDateTime(visit.entry_time)}</td>
+                    <td>${visit.exit_time ? formatDateTime(visit.exit_time) : '-'}</td>
+                    <td>${visit.visit_id || '-'}</td>
+                </tr>
+            `;
+            visitsTable.innerHTML += row;
+        });
+    } catch (error) {
+        showNotification('Помилка завантаження відвідувань: ' + error.message, 'danger');
+    }
+}
+
+async function recordVisit() {
+    const clientId = document.getElementById('visitClientId').value;
+    const serviceId = document.getElementById('visitServiceId').value;
+
+    if (!clientId || !serviceId) {
+        showNotification('Оберіть клієнта та послугу', 'warning');
+        return;
+    }
+
+    try {
+        await API.visits.create({
+            client_id: clientId,
+            service_id: serviceId
+        });
+        showNotification('Відвідування зареєстровано', 'success');
+        document.getElementById('visitForm').reset();
+        loadVisits();
+    } catch (error) {
+        showNotification('Помилка: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// ANALYTICS
+// ==========================================
+
+async function loadAnalytics() {
+    try {
+        const sportAnalytics = await API.sportAnalytics();
+        const reports = await API.sportReports();
+        const popularProducts = await API.products.stockExtremes();
+
+        document.getElementById('totalClients').textContent = reports.total_clients ?? 0;
+        document.getElementById('activeMembers').textContent = reports.total_revenue ? 'N/A' : 0;
+        document.getElementById('totalRevenue').textContent = formatPrice(reports.total_revenue || 0);
+        document.getElementById('monthlyRevenue').textContent = formatPrice(sportAnalytics.avg_revenue_per_client || 0);
+
+        // Popular products placeholder
+        if (popularProducts) {
+            const servicesList = document.getElementById('popularServices');
+            servicesList.innerHTML = '';
+            ['minimum', 'maximum'].forEach(key => {
+                const item = popularProducts[key];
+                if (item) {
+                    servicesList.innerHTML += `<li>${key.toUpperCase()}: ${item.name} (арт. ${item.article}) — ${item.quantity} шт</li>`;
+                }
+            });
+        }
+    } catch (error) {
+        showNotification('Помилка завантаження аналітики: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+function freezeMembership(id) {
+    showNotification('Заморозка абонемента недоступна в цій версії API', 'warning');
+}
+
+function checkOutVisit(id) {
+    showNotification('Закриття відвідування недоступне (немає ендпоінта)', 'warning');
+}
+
+// ==========================================
+// DATABASE QUERIES
+// ==========================================
+
+function loadDBQueries() {
+    try {
+        showNotification('🔍 Запити до баз даних завантажені', 'info');
+    } catch (error) {
+        console.error('Помилка завантаження запитів БД:', error);
+    }
+}
+
+function switchQueryTab(tabName) {
+    // Hide all query tabs
+    document.querySelectorAll('[id^="query"]').forEach(el => {
+        el.style.display = 'none';
+    });
+    
+    // Reset all tab button styles
+    document.querySelectorAll('.query-tab').forEach(btn => {
+        btn.style.color = '#7f8c8d';
+        btn.style.borderBottom = 'none';
+    });
+    
+    // Map tab names to correct IDs (handling special cases like suppliers typo in HTML)
+    const tabIdMap = {
+        'productImage': 'queryProductImage',
+        'assortment': 'queryAssortment',
+        'priceQty': 'queryPriceQty',
+        'minMax': 'queryMinMax',
+        'suppliers': 'querySupplers',  // HTML has typo 'Supplers' instead of 'Suppliers'
+        'inventory': 'queryInventory',
+        'orders': 'queryOrders'
+    };
+    
+    // Show selected query tab
+    let queryId = tabIdMap[tabName] || 'query' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+    const selectedQuery = document.getElementById(queryId);
+    if (selectedQuery) {
+        selectedQuery.style.display = 'block';
+    } else {
+        console.warn(`Query tab not found: ${queryId}`);
+    }
+    
+    // Highlight active tab
+    if (event && event.target) {
+        event.target.style.color = 'var(--primary-color)';
+        event.target.style.borderBottom = '3px solid var(--primary-color)';
+    }
+}
+
+function generateOrder() {
+    const productName = document.getElementById('orderProductName').value;
+    const quantity = parseInt(document.getElementById('orderQuantity').value);
+    
+    if (!productName || !quantity || quantity < 1) {
+        showNotification('⚠️ Заповніть усі поля', 'warning');
+        return;
+    }
+    
+    // Get product info based on selection
+    let productInfo = {};
+    const productMap = {
+        'SKU-001': { name: 'Гантель 5кг', supplier: 'ООО Спортмаг', minRequired: 5 },
+        'SKU-002': { name: 'Коврик для йоги', supplier: 'Ltd SportEquip', minRequired: 10 },
+        'SKU-003': { name: 'Штанга 20кг', supplier: 'ООО Спортмаг', minRequired: 8 }
+    };
+    
+    productInfo = productMap[productName];
+    
+    if (!productInfo) {
+        showNotification('❌ Товар не знайдено', 'danger');
+        return;
+    }
+    
+    // Check if quantity meets minimum requirement
+    if (quantity < productInfo.minRequired) {
+        showNotification(`⚠️ Мінімальний обсяг замовлення: ${productInfo.minRequired} шт`, 'warning');
+        return;
+    }
+    
+    // Generate order letter
+    const orderDate = new Date().toLocaleDateString('uk-UA');
+    const deliveryDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString('uk-UA');
+    
+    const orderLetter = `
+    ╔════════════════════════════════════════════════════════╗
+    ║          ДІЛОВЕ ЗАМОВЛЕННЯ НА ПОСТАЧАННЯ              ║
+    ╚════════════════════════════════════════════════════════╝
+    
+    Дата: ${orderDate}
+    Замовник: Спорткомплекс "Active Fit"
+    Адреса: м. Київ, вул. Тренувальна, 15
+    
+    ────────────────────────────────────────────────────────
+    ДЕТАЛІ ЗАМОВЛЕННЯ:
+    ────────────────────────────────────────────────────────
+    
+    Постачальник: ${productInfo.supplier}
+    
+    📦 ПРОДУКЦІЯ:
+       • Найменування: ${productInfo.name}
+       • Артикул: ${productName}
+       • Запитувана кількість: ${quantity} шт
+       • Перевищує мінімум наявних запасів: так ✓
+    
+    📅 УМОВИ ПОСТАЧАННЯ:
+       • Очікувана дата доставки: ${deliveryDate}
+       • Умови оплати: В прийомі товару
+       • Спосіб доставки: Експрес доставка
+    
+    ────────────────────────────────────────────────────────
+    
+    З найкращими побажаннями,
+    Керівник складу
+    Спорткомплекс "Active Fit"
+    
+    ═══════════════════════════════════════════════════════════
+    `;
+    
+    // Display the order
+    const container = document.getElementById('generatedOrdersContainer');
+    const ordersContent = document.getElementById('ordersContent');
+    
+    ordersContent.innerHTML = `<pre style="background: white; padding: 1.5rem; font-family: 'Courier New', monospace; font-size: 0.9rem; line-height: 1.6; border-radius: 5px; overflow-x: auto;">${orderLetter}</pre>
+    <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+        <button class="btn-primary" onclick="printOrder()">🖨️ Друкувати</button>
+        <button class="btn-success" onclick="sendOrder('${productInfo.supplier}', '${quantity} ${productInfo.name}')">📧 Надіслати</button>
+        <button class="btn-warning" onclick="clearOrder()">✖️ Очистити</button>
+    </div>`;
+    
+    container.style.display = 'block';
+    showNotification('✅ Замовлення сформовано успішно!', 'success');
+}
+
+function printOrder() {
+    window.print();
+    showNotification('🖨️ Відправлено на друк', 'info');
+}
+
+function sendOrder(supplier, product) {
+    showNotification(`📧 Замовлення надіслано ${supplier}\n${product}`, 'success');
+}
+
+function clearOrder() {
+    document.getElementById('generatedOrdersContainer').style.display = 'none';
+    document.getElementById('orderProductName').value = '';
+    document.getElementById('orderQuantity').value = '';
+    showNotification('🗑️ Замовлення очищено', 'info');
+}
+
+// ==========================================
+// TRAINER EDIT/DELETE
+// ==========================================
+async function editTrainer(trainerId) {
+    try {
+        const trainers = await API.trainers.list();
+        const trainer = trainers.find(t => t.trainer_id === trainerId);
+
+        if (!trainer) {
+            showNotification('Тренера не знайдено', 'danger');
+            return;
+        }
+
+        const fullName = prompt('ПІБ тренера', trainer.full_name || '');
+        if (fullName === null || !fullName.trim()) {
+            showNotification('Редагування скасовано', 'info');
+            return;
+        }
+
+        const specialization = prompt('Спеціалізація', trainer.specialization || '');
+        if (specialization === null || !specialization.trim()) {
+            showNotification('Спеціалізація обов\'язкова', 'warning');
+            return;
+        }
+
+        const phone = prompt('Телефон', trainer.contact_info?.phone || '') || '';
+        const email = prompt('Email', trainer.contact_info?.email || '') || '';
+
+        const contact_info = {};
+        if (phone.trim()) contact_info.phone = phone.trim();
+        if (email.trim()) contact_info.email = email.trim();
+
+        const payload = {
+            full_name: fullName.trim(),
+            specialization: specialization.trim(),
+            birth_date: trainer.birth_date || '1990-01-01',
+            gender: trainer.gender || 'MALE',
+            contact_info: Object.keys(contact_info).length ? contact_info : null
+        };
+
+        await API.trainers.update(trainerId, payload);
+        showNotification('✓ Тренера оновлено', 'success');
+        loadTrainers();
+    } catch (error) {
+        console.error('[EditTrainer] Error:', error);
+        showNotification('Помилка редагування: ' + error.message, 'danger');
+    }
+}
+
+async function deleteTrainer(trainerId) {
+    if (!confirm('Видалити цього тренера?')) return;
+    try {
+        await apiFetch(`/sport/trainers/${trainerId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        showNotification('✓ Тренер видалений успішно', 'success');
+        loadTrainers();
+    } catch (error) {
+        showNotification('Помилка видалення: ' + error.message, 'danger');
+    }
+}
+
+// ==========================================
+// SERVICE EDIT/DELETE
+// ==========================================
+async function editService(serviceId) {
+    try {
+        const services = await API.services.list();
+        const service = services.find(s => s.service_id === serviceId);
+
+        if (!service) {
+            showNotification('Послугу не знайдено', 'danger');
+            return;
+        }
+
+        const name = prompt('Назва послуги', service.service_name || '');
+        if (name === null || !name.trim()) {
+            showNotification('Редагування скасовано', 'info');
+            return;
+        }
+
+        const priceInput = prompt('Ціна (₴)', service.price ?? '');
+        if (priceInput === null) {
+            showNotification('Редагування скасовано', 'info');
+            return;
+        }
+
+        const price = parseFloat(priceInput);
+        if (Number.isNaN(price) || price <= 0) {
+            showNotification('Ціна повинна бути додатним числом', 'warning');
+            return;
+        }
+
+        const requiresMedical = confirm(`Потрібна медична довідка? Поточне значення: ${service.requires_medical_certificate ? 'так' : 'ні'}`);
+
+        const payload = {
+            service_name: name.trim(),
+            price: price,
+            requires_medical_certificate: requiresMedical
+        };
+
+        await API.services.update(serviceId, payload);
+        showNotification('✓ Послугу оновлено', 'success');
+        loadAdminServices();
+    } catch (error) {
+        console.error('[EditService] Error:', error);
+        showNotification('Помилка редагування: ' + error.message, 'danger');
+    }
+}
+
+async function deleteService(serviceId) {
+    if (!confirm('Видалити цю послугу?')) return;
+    try {
+        await apiFetch(`/sport/services/${serviceId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        showNotification('✓ Послуга видалена успішно', 'success');
+        loadAdminServices();
+    } catch (error) {
+        showNotification('Помилка видалення: ' + error.message, 'danger');
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if user has token, only then verify auth status
+    const token = localStorage.getItem('authToken');
+    if (token) {
+        updateAuthStatus();
+    } else {
+        // User is not authenticated, show login button
+        document.getElementById('authStatus').textContent = '❌ Не авторизовано';
+        document.getElementById('loginBtn').style.display = 'inline-block';
+        document.getElementById('logoutBtn').style.display = 'none';
+    }
+    switchPage('home');
+});
