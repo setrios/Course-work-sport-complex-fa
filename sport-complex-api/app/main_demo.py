@@ -1,7 +1,7 @@
 # Швидкий фікс для демо-режиму
 # Цей файл тимчасово відключає підключення до БД для тестування фронтенду
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -263,6 +263,82 @@ def create_order(data: dict):
     DEMO_ORDERS.append(new_order)
     
     return new_order
+
+# BOOKINGS (Admin View Support)
+DEMO_BOOKINGS = []
+
+@app.get("/api/v1/bookings")
+def get_bookings():
+    return DEMO_BOOKINGS
+
+@app.post("/api/v1/bookings")
+def create_booking(data: dict):
+    # Generate ID
+    new_id = len(DEMO_BOOKINGS) + 1
+    booking_number = f"BK-{20250000 + new_id}"
+    
+    # Resolve Trainer Name
+    trainer_id = data.get("trainer_id")
+    trainer_name = None
+    if trainer_id:
+        for t in DEMO_TRAINERS:
+            if str(t["id"]) == str(trainer_id):
+                trainer_name = f"{t['first_name']} {t['last_name']}"
+                break
+    
+    # Slot Validation Rules
+    service_name = data.get("service_name", "")
+    booking_date = data.get("date")
+    booking_time = data.get("time") # Format "HH:mm"
+    
+    try:
+        hour = int(booking_time.split(":")[0])
+    except:
+        raise HTTPException(status_code=400, detail="Невірний формат часу")
+
+    # Rule 1: Operating Hours (8:00 - 21:00)
+    # Allows booking up to 20:00 (ending at 21:00)
+    if hour < 8 or hour > 20: 
+        raise HTTPException(status_code=400, detail="Клуб працює з 8:00 до 21:00")
+
+    # Rule 2: Group vs Personal Slots
+    is_group = "Групове" in service_name
+    
+    if is_group:
+        # Group: Only 10:00 - 12:00
+        if hour not in [10, 11]:
+            raise HTTPException(status_code=400, detail="Групові тренування тільки з 10:00 до 12:00")
+            
+        # Group bookings are NON-BLOCKING (unlimited capacity for demo)
+    else:
+        # Personal: Any other time EXCEPT 10:00-12:00
+        if hour in [10, 11]:
+            raise HTTPException(status_code=400, detail="Цей час зарезервовано для групових занять")
+            
+        # Personal Conflict Check (Blocking)
+        if trainer_id:
+            for booking in DEMO_BOOKINGS:
+                if (booking.get("trainer_name") == trainer_name and 
+                    booking.get("date") == booking_date and 
+                    booking.get("time") == booking_time and
+                    booking.get("status") != "cancelled"):
+                    raise HTTPException(status_code=400, detail="Цей час вже зайнято. Оберіть інший слот.")
+
+    new_booking = {
+        "id": new_id,
+        "booking_number": booking_number,
+        "service_name": service_name,
+        "date": booking_date,
+        "time": f"{booking_time} - {hour+1}:00", # Save slot range
+        "notes": data.get("notes"),
+        "status": "confirmed",
+        "client_id": 1, 
+        "trainer_name": trainer_name,
+        "created_at": "2025-12-06T12:00:00"
+    }
+    
+    DEMO_BOOKINGS.append(new_booking)
+    return new_booking
 
 @app.get("/health")
 def health_check():

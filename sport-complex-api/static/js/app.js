@@ -42,13 +42,16 @@ const app = {
 
     updateNavigation() {
         const clientsLink = document.querySelector('a[href="#clients"]');
+        const bookingsLink = document.querySelector('a[href="#bookings"]');
         const analyticsLink = document.querySelector('a[href="#analytics"]');
 
         if (this.currentUser && this.currentUser.role === 'admin') {
             if (clientsLink) clientsLink.style.display = '';
+            if (bookingsLink) bookingsLink.style.display = '';
             if (analyticsLink) analyticsLink.style.display = '';
         } else {
             if (clientsLink) clientsLink.style.display = 'none';
+            if (bookingsLink) bookingsLink.style.display = 'none';
             if (analyticsLink) analyticsLink.style.display = 'none';
         }
     },
@@ -76,6 +79,7 @@ const app = {
             'services': () => this.renderServices(),
             'trainers': () => this.renderTrainers(),
             'clients': () => this.renderClients(),
+            'bookings': () => this.renderBookings(),
             'analytics': () => this.renderAnalytics()
         };
 
@@ -215,12 +219,26 @@ const app = {
 
         try {
             const trainers = await api.getTrainers({ limit: 20 });
+            let bookings = [];
+            const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+
+            if (isAdmin) {
+                bookings = await api.getBookings();
+            }
 
             appEl.innerHTML = `
                 <div class="container">
                     <h1 style="margin-bottom: 2rem;">👥 Наші тренери</h1>
                     <div class="card-grid">
-                        ${trainers.map(trainer => `
+                        ${trainers.map(trainer => {
+                // Filter bookings for this trainer
+                const trainerBookings = isAdmin ? bookings.filter(b =>
+                    b.trainer_name &&
+                    b.trainer_name.includes(trainer.last_name) &&
+                    b.status !== 'cancelled'
+                ).sort((a, b) => new Date(a.date + 'T' + a.time.substring(0, 5)) - new Date(b.date + 'T' + b.time.substring(0, 5))) : [];
+
+                return `
                             <div class="card" onclick="app.viewTrainer(${trainer.id})" style="cursor: pointer;">
                                 <div class="product-image">${this.getTrainerIcon(trainer.specialization)}</div>
                                 <h3>${trainer.first_name} ${trainer.last_name}</h3>
@@ -233,8 +251,25 @@ const app = {
                                 <div style="margin-top: 1rem;">
                                     <strong>${trainer.hourly_rate}</strong> грн/год
                                 </div>
+                                ${isAdmin ? `
+                                    <div style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 0.5rem;">
+                                        <p style="font-size: 0.85rem; font-weight: bold;">📅 Зайняті слоти:</p>
+                                        ${trainerBookings.length > 0 ?
+                            `<ul style="font-size: 0.8rem; list-style: none; padding: 0; max-height: 100px; overflow-y: auto;">
+                                                ${trainerBookings.map(b => `
+                                                    <li style="margin-bottom: 2px;">
+                                                        <span style="color: var(--primary);">●</span> 
+                                                        ${new Date(b.date).toLocaleDateString('uk-UA')} ${b.time}
+                                                    </li>
+                                                `).join('')}
+                                            </ul>`
+                            : '<p style="font-size: 0.8rem; color: var(--text-muted);">Вільний графік</p>'
+                        }
+                                    </div>
+                                ` : ''}
                             </div>
-                        `).join('')}
+                            `;
+            }).join('')}
                     </div>
                 </div>
             `;
@@ -294,6 +329,64 @@ const app = {
                             </tbody>
                            </table>`
                     : components.showEmptyState('Поки що немає клієнтів', '👥')
+                }
+                </div>
+            `;
+        } catch (error) {
+            appEl.innerHTML = `<div class="container">${components.showEmptyState('Помилка завантаження', '❌')}</div>`;
+        }
+    },
+
+    async renderBookings() {
+        const appEl = document.getElementById('app');
+
+        if (!this.currentUser || this.currentUser.role !== 'admin') {
+            appEl.innerHTML = `
+                <div class="container">
+                    ${components.showEmptyState('Доступ заборонено', '🔒')}
+                    <p class="text-center">Ця сторінка доступна тільки адміністраторам</p>
+                </div>
+            `;
+            return;
+        }
+
+        appEl.innerHTML = components.showLoading();
+
+        try {
+            const bookings = await api.getBookings();
+
+            appEl.innerHTML = `
+                <div class="container">
+                    <h1 style="margin-bottom: 2rem;">📅 Бронювання</h1>
+
+                    ${bookings.length === 0
+                    ? components.showEmptyState('Немає бронювань', '📭')
+                    : `<table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Номер</th>
+                                    <th>Послуга</th>
+                                    <th>Тренер</th>
+                                    <th>Дата</th>
+                                    <th>Час</th>
+                                    <th>Статус</th>
+                                    <th>Примітки</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bookings.map(b => `
+                                    <tr>
+                                        <td><strong>${b.booking_number}</strong></td>
+                                        <td>${b.service_name}</td>
+                                        <td>${b.trainer_name || '-'}</td>
+                                        <td>${new Date(b.date).toLocaleDateString('uk-UA')}</td>
+                                        <td>${b.time}</td>
+                                        <td><span style="color: var(--success)">${b.status}</span></td>
+                                        <td>${b.notes || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                           </table>`
                 }
                 </div>
             `;
@@ -639,54 +732,184 @@ const app = {
     // Simple Service Booking
     async bookService(serviceId, serviceName, price) {
         try {
-            const services = await api.getServices();
+            const [services, trainers, bookings] = await Promise.all([
+                api.getServices(),
+                api.getTrainers(),
+                api.getBookings()
+            ]);
+
             const service = services.find(s => s.id === serviceId);
-            const duration = service ? service.duration_minutes : 60;
+            const isGroup = serviceName.includes('Групове');
 
             const content = `
-                <div style="max-width: 500px;">
+                <div style="max-width: 600px;">
                     <h3>📅 Бронювання послуги</h3>
                     <p><strong>Послуга:</strong> ${serviceName}</p>
                     <p><strong>Ціна:</strong> ${price} грн</p>
-                    <p><strong>Тривалість:</strong> ${duration} хвилин</p>
+                    <p><strong>Тривалість:</strong> 60 хвилин</p>
                     
-                    <form onsubmit="app.handleBooking(event, '${serviceName}')" style="margin-top: 2rem;">
+                    <form id="booking-form" onsubmit="event.preventDefault(); app.submitBooking('${serviceName}')" style="margin-top: 2rem;">
+                        <input type="hidden" name="time" id="selected-time">
+                        
+                        ${!isGroup ? `
+                        <div class="form-group">
+                            <label class="form-label">👤 Оберіть тренера</label>
+                            <select class="form-input" name="trainer_id" onchange="app.renderSlots(this.value, '${serviceName}', '${new Date().toISOString().split('T')[0]}')">
+                                <option value="">-- Оберіть тренера --</option>
+                                ${trainers.map(t => `<option value="${t.id}">${t.first_name} ${t.last_name} (${t.specialization})</option>`).join('')}
+                            </select>
+                        </div>` : ''}
+
                         <div class="form-group">
                             <label class="form-label">📅 Дата</label>
-                            <input type="date" class="form-input" name="date" required min="${new Date().toISOString().split('T')[0]}">
+                            <input type="date" class="form-input" name="date" 
+                                   value="${new Date().toISOString().split('T')[0]}"
+                                   min="${new Date().toISOString().split('T')[0]}"
+                                   onchange="app.renderSlots(document.querySelector('[name=trainer_id]')?.value, '${serviceName}', this.value)">
                         </div>
+
                         <div class="form-group">
-                            <label class="form-label">🕐 Час</label>
-                            <input type="time" class="form-input" name="time" required>
+                            <label class="form-label">⏰ Оберіть слот</label>
+                            <div id="slots-container" class="slots-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px;">
+                                <!-- Slots rendered dynamically -->
+                                <p class="text-muted">Оберіть тренера та дату, щоб побачити доступні слоти</p>
+                            </div>
                         </div>
+
                         <div class="form-group">
-                            <label class="form-label">📝 Примітки (опціонально)</label>
-                            <textarea class="form-input" name="notes" rows="3" placeholder="Додаткові побажання..."></textarea>
+                            <label class="form-label">📝 Примітки</label>
+                            <textarea class="form-input" name="notes" rows="2"></textarea>
                         </div>
-                        <button type="submit" class="btn">✅ Підтвердити бронювання</button>
+
+                        <button type="submit" class="btn" id="submit-btn" disabled>✅ Підтвердити</button>
                     </form>
                 </div>
             `;
 
             components.showModal('📅 Бронювання', content);
+
+            // Store bookings globally for slot rendering
+            this.currentBookings = bookings;
+
+            // Initial render for Group training (no trainer needed)
+            if (isGroup) {
+                this.renderSlots(null, serviceName, new Date().toISOString().split('T')[0]);
+            }
+
         } catch (error) {
             components.showToast('Помилка завантаження даних', 'error');
+            console.error(error);
         }
     },
 
-    handleBooking(event, serviceName) {
-        event.preventDefault();
+    renderSlots(trainerId, serviceName, date) {
+        const container = document.getElementById('slots-container');
+        const submitBtn = document.getElementById('submit-btn');
+        const isGroup = serviceName.includes('Групове');
 
-        const formData = new FormData(event.target);
-        const bookingNumber = `BK-${Date.now().toString().slice(-6)}`;
+        if (!isGroup && !trainerId) {
+            container.innerHTML = '<p class="text-muted">Спочатку оберіть тренера</p>';
+            return;
+        }
 
-        components.showToast(`Бронювання ${bookingNumber} створено!`, 'success');
-        components.closeModal();
+        let slotsHtml = '';
+        const startHour = 8;
+        const endHour = 20; // Last booking starts at 20:00
 
-        setTimeout(() => {
-            const dateStr = new Date(formData.get('date')).toLocaleDateString('uk-UA');
-            components.showToast(`${serviceName} на ${dateStr} о ${formData.get('time')}`, 'success');
-        }, 1500);
+        for (let h = startHour; h <= endHour; h++) {
+            const timeStr = `${h.toString().padStart(2, '0')}:00`;
+            const slotEndStr = `${(h + 1).toString().padStart(2, '0')}:00`;
+
+            let isAvailable = true;
+            let cssClass = 'btn-outline';
+
+            // Rule: Group vs Personal Hours
+            if (isGroup) {
+                if (h !== 10 && h !== 11) isAvailable = false; // Only 10-12
+            } else {
+                if (h === 10 || h === 11) isAvailable = false; // Reserved for Group
+            }
+
+            // Rule: Conflict Check (Personal only)
+            if (isAvailable && !isGroup && trainerId) {
+                // Re-implementing check properly
+                const trainerSelect = document.querySelector('[name=trainer_id]');
+                const selectedTrainerName = trainerSelect ? trainerSelect.options[trainerSelect.selectedIndex].text.split(' (')[0] : '';
+
+                // Check if slot matches time AND trainer name (partial match on Last Name to catch collisions)
+                const collision = this.currentBookings.find(b =>
+                    b.date === date &&
+                    b.trainer_name &&
+                    b.trainer_name.includes(selectedTrainerName.split(' ')[1]) &&
+                    b.status !== 'cancelled' &&
+                    (b.time === timeStr || b.time.startsWith(timeStr))
+                );
+
+                if (collision) {
+                    isAvailable = false;
+                    cssClass = 'btn-secondary'; // Visually disabled
+                }
+            }
+
+            if (isAvailable) {
+                slotsHtml += `
+                    <button type="button" class="btn ${cssClass}" 
+                        onclick="app.selectSlot(this, '${timeStr}')"
+                        style="width: 100%; margin: 0;">
+                        ${timeStr} - ${slotEndStr}
+                    </button>`;
+            } else {
+                slotsHtml += `
+                    <button type="button" class="btn btn-secondary" disabled 
+                        style="width: 100%; margin: 0; opacity: 0.5;">
+                        ${timeStr} - ${slotEndStr}
+                    </button>`;
+            }
+        }
+
+        container.innerHTML = slotsHtml;
+    },
+
+    selectSlot(btn, time) {
+        // Visual selection
+        document.querySelectorAll('#slots-container .btn').forEach(b => {
+            if (!b.disabled) b.className = 'btn btn-outline';
+        });
+        btn.className = 'btn btn-primary'; // Highlight selected
+
+        // save value
+        document.getElementById('selected-time').value = time;
+        document.getElementById('submit-btn').removeAttribute('disabled');
+    },
+
+    async submitBooking(serviceName) {
+        const form = document.getElementById('booking-form');
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        const formData = new FormData(form);
+        const data = {
+            service_name: serviceName,
+            trainer_id: formData.get('trainer_id'),
+            date: formData.get('date'),
+            time: formData.get('time'),
+            notes: formData.get('notes')
+        };
+
+        try {
+            const booking = await api.createBooking(data);
+            components.showToast(`Бронювання ${booking.booking_number} створено!`, 'success');
+            components.closeModal();
+
+            // Redirect to bookings if admin
+            if (this.currentUser && this.currentUser.role === 'admin') {
+                window.location.hash = '#bookings';
+            }
+        } catch (error) {
+            components.showToast(error.message || 'Помилка створення бронювання', 'error');
+        }
     },
 
     // Authentication

@@ -15,7 +15,8 @@ const api = {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
             }
 
             return await response.json();
@@ -122,6 +123,18 @@ const api = {
 
     async getTrainerRecommendations(clientId, limit = 5) {
         return this.fetch(`/recommendations/trainers/${clientId}?limit=${limit}`);
+    },
+
+    // Bookings
+    async createBooking(data) {
+        return this.fetch('/bookings', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    async getBookings() {
+        return this.fetch('/bookings');
     },
 
     // Authentication
