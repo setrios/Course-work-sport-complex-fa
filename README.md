@@ -2,12 +2,7 @@
 
 A full-stack web application for managing a sport complex with multi-database architecture, featuring client management, trainer scheduling, subscription handling, and role-based access control.
 
-### Showcase
-![alt text](assets/screenshots/image-1.png)
 ![alt text](assets/screenshots/image-2.png)
-![alt text](assets/screenshots/image-3.png)
-![alt text](assets/screenshots/image-5.png)
-![alt text](assets/screenshots/image-6.png)
 
 
 ### Multi-Database Architecture
@@ -145,8 +140,15 @@ npm install
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`
+The frontend will be available at `http://localhost:3000`
 
+---
+
+### Showcase
+![alt text](assets/screenshots/image-1.png)
+![alt text](assets/screenshots/image-3.png)
+![alt text](assets/screenshots/image-5.png)
+![alt text](assets/screenshots/image-6.png)
 
 ---
 
