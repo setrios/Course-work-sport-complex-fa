@@ -5,10 +5,18 @@ from datetime import datetime, timedelta
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Body, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
 
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Boolean, Float, func
-from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from models import Base, ClientDB, ServiceDB, SubscriptionDB, TrainingSessionDB, ProductDB, SpecializationDB, SessionLocal, engine
+from schemas import (
+    ProductCreate, ProductOut, ProductUpdate,
+    ClientCreate, TrainerCreate, UserUpdate, TrainerUpdate,
+    MedicalDocInput, SubscriptionCreate, SubscriptionUpdate,
+    ServiceUpdate, SubscriptionCancel, TrainingSessionCreate,
+    TrainingSessionOut, TrainingSessionCreateNoTrainer,
+    SpecializationCreate, SpecializationOut
+)
 
 import redis
 import couchdb
@@ -37,10 +45,7 @@ if not SECRET_KEY:
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://sport-complex-cw:sport-complex-cw@127.0.0.1:3306/sport-complex-cw"
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
 
 redis_client = redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
 
@@ -56,200 +61,6 @@ except Exception as e:
 
 neo4j_driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "neo4jneo4j"))
 
-
-
-class ServiceDB(Base):
-    __tablename__ = "services"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True) 
-    requires_medical = Column(Boolean, default=False)
-
-
-class ClientDB(Base):
-    __tablename__ = "clients"
-    id = Column(Integer, primary_key=True, index=True)
-    full_name = Column(String(100))
-    email = Column(String(100), unique=True)
-    password_hash = Column(String(255))  # Store hashed password
-    # role: 'client', 'trainer', 'admin' — keeps users in one table and allows easy filtering
-    role = Column(String(20), default="client", index=True)
-    subscriptions = relationship("SubscriptionDB", back_populates="client")
-
-
-class SubscriptionDB(Base):
-    __tablename__ = "subscriptions"
-    id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"))
-    service_id = Column(Integer, ForeignKey("services.id"))
-    plan_type = Column(String(50)) 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    medical_doc_id = Column(String(100), nullable=True)
-    
-    client = relationship("ClientDB", back_populates="subscriptions")
-    service = relationship("ServiceDB")
-
-
-class TrainingSessionDB(Base):
-    __tablename__ = "training_sessions"
-    id = Column(Integer, primary_key=True, index=True)
-    # allow trainer_id to be nullable for sessions created without an assigned trainer
-    trainer_id = Column(Integer, ForeignKey("clients.id"), index=True, nullable=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), index=True)
-    service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
-    scheduled_at = Column(DateTime, default=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    notes = Column(String(255), nullable=True)
-    duration_minutes = Column(Integer, default=60)  # default session duration: 1 hour
-    status = Column(String(20), default="scheduled", index=True)  # scheduled, in_progress, completed, cancelled
-
-    trainer = relationship("ClientDB", foreign_keys=[trainer_id])
-    client = relationship("ClientDB", foreign_keys=[client_id])
-    service = relationship("ServiceDB")
-
-
-class ProductDB(Base):
-    __tablename__ = "products"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(150), unique=True, index=True)
-    price = Column(Float, default=0.0)
-    stock = Column(Integer, default=0)
-    description = Column(String(500), nullable=True)
-    available = Column(Boolean, default=True, index=True)
-
-
-class SpecializationDB(Base):
-    __tablename__ = "specializations"
-    id = Column(Integer, primary_key=True, index=True)
-    trainer_id = Column(Integer, ForeignKey("clients.id"), index=True)
-    service_id = Column(Integer, ForeignKey("services.id"), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    trainer = relationship("ClientDB", foreign_keys=[trainer_id])
-    service = relationship("ServiceDB")
-
-
-
-class ClientCreate(BaseModel):
-    full_name: str
-    email: str
-    password: str
-
-
-class TrainerCreate(BaseModel):
-    full_name: str
-    email: str
-    password: str
-
-
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-
-
-class TrainerUpdate(UserUpdate):
-    pass
-
-class MedicalDocInput(BaseModel):
-    client_email: str
-    doctor_name: str
-    result: str 
-    details: dict 
-
-class SubscriptionCreate(BaseModel):
-    client_id: int
-    service_name: str
-    plan_type: str 
-    medical_doc_id: Optional[str] = None
-
-
-class SubscriptionUpdate(BaseModel):
-    plan_type: Optional[str] = None
-    medical_doc_id: Optional[str] = None
-
-
-class ServiceUpdate(BaseModel):
-    name: Optional[str] = None
-    requires_medical: Optional[bool] = None
-
-
-class SubscriptionCancel(BaseModel):
-    client_id: int
-    service_name: str
-
-
-class TrainingSessionOut(BaseModel):
-    id: int
-    trainer_id: int
-    client_id: int
-    client_name: Optional[str]
-    client_email: Optional[str]
-    service_name: Optional[str]
-    scheduled_at: datetime
-    notes: Optional[str]
-    duration_minutes: int
-    status: str
-
-    class Config:
-        orm_mode = True
-
-
-class TrainingSessionCreate(BaseModel):
-    trainer_id: int
-    client_id: int
-    service_id: int
-    scheduled_at: Optional[datetime] = None
-    notes: Optional[str] = None
-    duration_minutes: Optional[int] = 60
-
-
-class TrainingSessionCreateNoTrainer(BaseModel):
-    client_id: int
-    service_id: int
-    scheduled_at: Optional[datetime] = None
-    notes: Optional[str] = None
-    duration_minutes: Optional[int] = 60
-
-
-class ProductCreate(BaseModel):
-    name: str
-    price: float
-    stock: int = 0
-    description: Optional[str] = None
-    available: Optional[bool] = True
-
-
-class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    price: Optional[float] = None
-    stock: Optional[int] = None
-    description: Optional[str] = None
-    available: Optional[bool] = None
-
-
-class ProductOut(BaseModel):
-    id: int
-    name: str
-    price: float
-    stock: int
-    description: Optional[str]
-    available: bool
-
-    class Config:
-        orm_mode = True
-
-
-class SpecializationCreate(BaseModel):
-    service_id: int
-
-
-class SpecializationOut(BaseModel):
-    id: int
-    service_id: int
-    service_name: str
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 
 
